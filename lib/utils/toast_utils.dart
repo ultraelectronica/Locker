@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:first_project/themes/app_colors.dart';
+import 'package:locker/themes/app_colors.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
 class ToastUtils {
