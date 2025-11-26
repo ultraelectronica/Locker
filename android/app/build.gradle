@@ -42,7 +42,7 @@ android {
         applicationId = "com.example.first_project"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
-        minSdk = flutter.minSdkVersion
+        minSdkVersion flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
@@ -53,8 +53,15 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
+            // Disabling R8 for now to debug the crash if it persists, though minSdk 23 should fix it.
+            shrinkResources false
+            minifyEnabled false
         }
     }
+}
+
+dependencies {
+    implementation "androidx.fragment:fragment:1.6.2"
 }
 
 flutter {
