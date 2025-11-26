@@ -36,6 +36,29 @@ class _BiometricSetupScreenState extends State<BiometricSetupScreen> {
       _errorMessage = null;
     });
 
+    // Check if biometric is available
+    final isAvailable = await _authService.isBiometricAvailable();
+    if (!isAvailable) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage =
+            'Biometric authentication is not available on this device. Please ensure you have enrolled a fingerprint in your device settings.';
+      });
+      return;
+    }
+
+    // Check available biometrics
+    final biometrics = await _authService.getAvailableBiometrics();
+    if (biometrics.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage =
+            'No biometric methods are enrolled. Please add a fingerprint in your device settings.';
+      });
+      return;
+    }
+
+    // Attempt to setup biometric authentication
     final success = await _authService.setupBiometricAuthentication();
 
     if (success && mounted) {
@@ -49,7 +72,7 @@ class _BiometricSetupScreenState extends State<BiometricSetupScreen> {
       setState(() {
         _isLoading = false;
         _errorMessage =
-            'Failed to set up biometric authentication. Please try again.';
+            'Biometric authentication setup was cancelled or failed. Please try again.';
       });
     }
   }

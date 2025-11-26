@@ -134,6 +134,8 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
 
                     // PIN Input Widget
                     PinInputWidget(
+                      key: ValueKey(
+                          _isConfirmation), // Force reset when mode changes
                       onPinComplete: _handlePinComplete,
                       onPinChanged: _handlePinChanged,
                       errorMessage: _errorMessage,
