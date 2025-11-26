@@ -178,12 +178,25 @@ class AuthService {
   /// Setup biometric authentication (should be called after password is set)
   Future<bool> setupBiometricAuthentication() async {
     try {
+      print('🔐 [AuthService] Checking biometric availability...');
       final isAvailable = await isBiometricAvailable();
-      if (!isAvailable) return false;
+      print('🔐 [AuthService] Biometric available: $isAvailable');
 
+      if (!isAvailable) {
+        print('❌ [AuthService] Biometric not available');
+        return false;
+      }
+
+      print('🔐 [AuthService] Getting available biometrics...');
       final biometrics = await getAvailableBiometrics();
-      if (biometrics.isEmpty) return false;
+      print('🔐 [AuthService] Available biometrics: $biometrics');
 
+      if (biometrics.isEmpty) {
+        print('❌ [AuthService] No biometrics enrolled');
+        return false;
+      }
+
+      print('🔐 [AuthService] Requesting biometric authentication...');
       final isAuthenticated = await _localAuth.authenticate(
         localizedReason: 'Set up biometric authentication',
         authMessages: [
@@ -197,14 +210,39 @@ class AuthService {
         ],
       );
 
+      print('🔐 [AuthService] Authentication result: $isAuthenticated');
+
       if (isAuthenticated) {
+        print('✅ [AuthService] Saving biometric settings...');
         await setBiometricEnabled(true);
         await _storage.write(key: _firstTimeKey, value: 'false');
         await _storage.write(key: _authMethodKey, value: 'biometric');
+        print('✅ [AuthService] Biometric setup complete');
         return true;
       }
+
+      print('❌ [AuthService] Authentication failed or cancelled');
+      return false;
+    } on PlatformException catch (e) {
+      print('❌❌ [AuthService] PlatformException: ${e.code} - ${e.message}');
+      // Handle specific biometric errors
+      if (e.code == 'NotAvailable') {
+        print('❌ [AuthService] Biometric not available on device');
+        return false;
+      } else if (e.code == 'NotEnrolled') {
+        print('❌ [AuthService] No biometric enrolled');
+        return false;
+      } else if (e.code == 'LockedOut' || e.code == 'PermanentlyLockedOut') {
+        print('❌ [AuthService] Biometric locked out');
+        return false;
+      } else if (e.code == 'UserCanceled' || e.code == 'Canceled') {
+        print('❌ [AuthService] User cancelled authentication');
+        return false;
+      }
+      print('❌ [AuthService] Unknown platform exception: ${e.code}');
       return false;
     } catch (e) {
+      print('❌❌ [AuthService] Unknown error: $e');
       return false;
     }
   }

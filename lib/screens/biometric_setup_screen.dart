@@ -36,9 +36,14 @@ class _BiometricSetupScreenState extends State<BiometricSetupScreen> {
       _errorMessage = null;
     });
 
+    debugPrint('[Biometric Setup] Starting biometric setup...');
+
     // Check if biometric is available
     final isAvailable = await _authService.isBiometricAvailable();
+    debugPrint('[Biometric Setup] Is biometric available: $isAvailable');
+
     if (!isAvailable) {
+      debugPrint('[Biometric Setup] Biometric not available');
       setState(() {
         _isLoading = false;
         _errorMessage =
@@ -49,7 +54,10 @@ class _BiometricSetupScreenState extends State<BiometricSetupScreen> {
 
     // Check available biometrics
     final biometrics = await _authService.getAvailableBiometrics();
+    debugPrint('[Biometric Setup] Available biometrics: $biometrics');
+
     if (biometrics.isEmpty) {
+      debugPrint('[Biometric Setup] No biometrics enrolled');
       setState(() {
         _isLoading = false;
         _errorMessage =
@@ -59,9 +67,12 @@ class _BiometricSetupScreenState extends State<BiometricSetupScreen> {
     }
 
     // Attempt to setup biometric authentication
+    debugPrint('[Biometric Setup] Calling setupBiometricAuthentication...');
     final success = await _authService.setupBiometricAuthentication();
+    debugPrint('[Biometric Setup] Setup result: $success');
 
     if (success && mounted) {
+      debugPrint('[Biometric Setup] Success! Navigating to gallery...');
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (context) => const GalleryVaultScreen(),
@@ -69,6 +80,7 @@ class _BiometricSetupScreenState extends State<BiometricSetupScreen> {
         (route) => false,
       );
     } else if (mounted) {
+      debugPrint('[Biometric Setup] Failed or cancelled');
       setState(() {
         _isLoading = false;
         _errorMessage =
