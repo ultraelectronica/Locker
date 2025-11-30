@@ -77,8 +77,8 @@ If you have any questions or suggestions, feel free to open an issue or contact 
 
 ---
 
+### Updates
+1. This project is now active and I am currently developing for new and refined version of the app.
+2. The biometrics work well now, you also have the option to either use the PIN or password.
 
-still not done bruv, sorry for the delay.
-
-thesis matters, lol.
 
