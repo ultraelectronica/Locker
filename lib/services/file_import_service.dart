@@ -78,10 +78,13 @@ class FileImportService {
       );
 
       // Delete originals from gallery if requested and import was successful
-      if (deleteOriginals && imported.isNotEmpty && assetsToDelete.isNotEmpty) {
-        final deleted = await _deleteAssetsFromGallery(assetsToDelete);
+      if (deleteOriginals && imported.isNotEmpty) {
+        var deleted = false;
+        if (assetsToDelete.isNotEmpty) {
+          deleted = await _deleteAssetsFromGallery(assetsToDelete);
+        }
+        // If gallery deletion failed or had no matches, try deleting by path
         if (!deleted && originalPaths.isNotEmpty) {
-          // Fallback: try direct file deletion if gallery delete failed
           await _deleteFiles(originalPaths);
         }
       }
@@ -166,8 +169,11 @@ class FileImportService {
       );
 
       // Delete originals from gallery
-      if (deleteOriginals && imported.isNotEmpty && assetsToDelete.isNotEmpty) {
-        final deleted = await _deleteAssetsFromGallery(assetsToDelete);
+      if (deleteOriginals && imported.isNotEmpty) {
+        var deleted = false;
+        if (assetsToDelete.isNotEmpty) {
+          deleted = await _deleteAssetsFromGallery(assetsToDelete);
+        }
         if (!deleted && originalPaths.isNotEmpty) {
           await _deleteFiles(originalPaths);
         }
@@ -555,8 +561,11 @@ class FileImportService {
       );
 
       // Delete from gallery if requested
-      if (deleteOriginals && imported.isNotEmpty && assetsToDelete.isNotEmpty) {
-        final deleted = await _deleteAssetsFromGallery(assetsToDelete);
+      if (deleteOriginals && imported.isNotEmpty) {
+        var deleted = false;
+        if (assetsToDelete.isNotEmpty) {
+          deleted = await _deleteAssetsFromGallery(assetsToDelete);
+        }
         if (!deleted && originalPaths.isNotEmpty) {
           await _deleteFiles(originalPaths);
         }
