@@ -17,15 +17,15 @@ class FileImportService {
   final PermissionService _permissionService = PermissionService.instance;
   final VaultService _vaultService = VaultService.instance;
 
-  /// Import images from gallery (multiple selection) and optionally delete from gallery
+  /// Import images from gallery using photo_manager for proper deletion support
   Future<ImportResult> importImagesFromGallery({
-    bool deleteOriginals = true, // Default to true for hiding files
+    bool deleteOriginals = true,
     Function(int current, int total)? onProgress,
   }) async {
     try {
       // Request permission
-      final hasPermission = await _permissionService.requestPhotosPermission();
-      if (!hasPermission) {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.hasAccess) {
         return ImportResult(
           success: false,
           error: 'Photo library permission denied',
@@ -33,7 +33,7 @@ class FileImportService {
         );
       }
 
-      // Pick multiple images
+      // Pick multiple images using image_picker for UI
       final images = await _imagePicker.pickMultiImage(
         imageQuality: 100,
       );
@@ -46,10 +46,17 @@ class FileImportService {
         );
       }
 
+      // Get all image assets from gallery to find matching ones for deletion
+      List<AssetEntity> assetsToDelete = [];
+      if (deleteOriginals) {
+        assetsToDelete = await _findMatchingAssets(
+          images.map((i) => i.name).toList(),
+          RequestType.image,
+        );
+      }
+
       // Convert to FileToVault list
       final filesToVault = <FileToVault>[];
-      final originalPaths = <String>[];
-
       for (final image in images) {
         final mimeType = lookupMimeType(image.path) ?? 'image/jpeg';
         filesToVault.add(FileToVault(
@@ -58,26 +65,26 @@ class FileImportService {
           type: VaultedFileType.image,
           mimeType: mimeType,
         ));
-        originalPaths.add(image.path);
       }
 
       // Add to vault
       final imported = await _vaultService.addFiles(
         files: filesToVault,
-        deleteOriginals: false, // We'll handle deletion separately
+        deleteOriginals:
+            false, // We'll handle deletion separately via PhotoManager
         onProgress: onProgress,
       );
 
       // Delete originals from gallery if requested and import was successful
-      if (deleteOriginals && imported.isNotEmpty) {
-        await _deleteFromGallery(originalPaths);
+      if (deleteOriginals && imported.isNotEmpty && assetsToDelete.isNotEmpty) {
+        await _deleteAssetsFromGallery(assetsToDelete);
       }
 
       return ImportResult(
         success: true,
         importedFiles: imported,
         message: 'Imported ${imported.length} image(s)',
-        deletedOriginals: deleteOriginals,
+        deletedOriginals: deleteOriginals && assetsToDelete.isNotEmpty,
       );
     } catch (e) {
       debugPrint('Error importing images from gallery: $e');
@@ -89,15 +96,15 @@ class FileImportService {
     }
   }
 
-  /// Import videos from gallery (multiple selection) and optionally delete from gallery
+  /// Import videos from gallery with proper deletion support
   Future<ImportResult> importVideosFromGallery({
     bool deleteOriginals = true,
     Function(int current, int total)? onProgress,
   }) async {
     try {
       // Request permission
-      final hasPermission = await _permissionService.requestVideosPermission();
-      if (!hasPermission) {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.hasAccess) {
         return ImportResult(
           success: false,
           error: 'Video library permission denied',
@@ -105,7 +112,7 @@ class FileImportService {
         );
       }
 
-      // Pick video - use file_picker for multiple selection
+      // Pick videos using file_picker for multiple selection
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
         allowMultiple: true,
@@ -119,10 +126,17 @@ class FileImportService {
         );
       }
 
+      // Get matching assets for deletion
+      List<AssetEntity> assetsToDelete = [];
+      if (deleteOriginals) {
+        assetsToDelete = await _findMatchingAssets(
+          result.files.map((f) => f.name).toList(),
+          RequestType.video,
+        );
+      }
+
       // Convert to FileToVault list
       final filesToVault = <FileToVault>[];
-      final originalPaths = <String>[];
-
       for (final file in result.files) {
         if (file.path == null) continue;
 
@@ -133,7 +147,6 @@ class FileImportService {
           type: VaultedFileType.video,
           mimeType: mimeType,
         ));
-        originalPaths.add(file.path!);
       }
 
       // Add to vault
@@ -143,16 +156,16 @@ class FileImportService {
         onProgress: onProgress,
       );
 
-      // Delete originals from gallery if requested
-      if (deleteOriginals && imported.isNotEmpty) {
-        await _deleteFromGallery(originalPaths);
+      // Delete originals from gallery
+      if (deleteOriginals && imported.isNotEmpty && assetsToDelete.isNotEmpty) {
+        await _deleteAssetsFromGallery(assetsToDelete);
       }
 
       return ImportResult(
         success: true,
         importedFiles: imported,
         message: 'Imported ${imported.length} video(s)',
-        deletedOriginals: deleteOriginals,
+        deletedOriginals: deleteOriginals && assetsToDelete.isNotEmpty,
       );
     } catch (e) {
       debugPrint('Error importing videos from gallery: $e');
@@ -317,10 +330,11 @@ class FileImportService {
         );
       }
 
-      // Convert to FileToVault list
-      final filesToVault = <FileToVault>[];
+      // Store original paths for deletion
       final originalPaths = <String>[];
 
+      // Convert to FileToVault list
+      final filesToVault = <FileToVault>[];
       for (final file in result.files) {
         if (file.path == null) continue;
 
@@ -332,7 +346,12 @@ class FileImportService {
           type: VaultedFileType.document,
           mimeType: mimeType,
         ));
-        originalPaths.add(file.path!);
+
+        // Try to get the original path (not cache path)
+        final originalPath = await _getOriginalPath(file.path!, file.name);
+        if (originalPath != null) {
+          originalPaths.add(originalPath);
+        }
       }
 
       // Add to vault
@@ -351,7 +370,7 @@ class FileImportService {
         success: true,
         importedFiles: imported,
         message: 'Imported ${imported.length} document(s)',
-        deletedOriginals: deleteOriginals,
+        deletedOriginals: deleteOriginals && originalPaths.isNotEmpty,
       );
     } catch (e) {
       debugPrint('Error importing documents: $e');
@@ -383,10 +402,12 @@ class FileImportService {
         );
       }
 
+      // Store info for deletion
+      final mediaFileNames = <String>[];
+      final nonMediaPaths = <String>[];
+
       // Convert to FileToVault list with auto-detected types
       final filesToVault = <FileToVault>[];
-      final originalPaths = <String>[];
-
       for (final file in result.files) {
         if (file.path == null) continue;
 
@@ -401,7 +422,19 @@ class FileImportService {
           type: type,
           mimeType: mimeType,
         ));
-        originalPaths.add(file.path!);
+
+        // Categorize for deletion
+        if (type == VaultedFileType.image || type == VaultedFileType.video) {
+          mediaFileNames.add(file.name);
+        } else {
+          final originalPath = await _getOriginalPath(file.path!, file.name);
+          if (originalPath != null) {
+            nonMediaPaths.add(originalPath);
+          } else if (await File(file.path!).exists()) {
+            // Fall back to the picker path when we can access the file directly
+            nonMediaPaths.add(file.path!);
+          }
+        }
       }
 
       // Add to vault
@@ -413,24 +446,17 @@ class FileImportService {
 
       // Delete originals if requested
       if (deleteOriginals && imported.isNotEmpty) {
-        // Check if any are media files that need gallery deletion
-        final mediaFiles = originalPaths.where((p) {
-          final ext = p.split('.').last.toLowerCase();
-          return supportedImageExtensions.contains(ext) ||
-              supportedVideoExtensions.contains(ext);
-        }).toList();
-
-        final otherFiles = originalPaths.where((p) {
-          final ext = p.split('.').last.toLowerCase();
-          return !supportedImageExtensions.contains(ext) &&
-              !supportedVideoExtensions.contains(ext);
-        }).toList();
-
-        if (mediaFiles.isNotEmpty) {
-          await _deleteFromGallery(mediaFiles);
+        // Delete media files via PhotoManager
+        if (mediaFileNames.isNotEmpty) {
+          final assets = await _findMatchingAssets(
+            mediaFileNames,
+            RequestType.common,
+          );
+          await _deleteAssetsFromGallery(assets);
         }
-        if (otherFiles.isNotEmpty) {
-          await _deleteFiles(otherFiles);
+        // Delete non-media files directly
+        if (nonMediaPaths.isNotEmpty) {
+          await _deleteFiles(nonMediaPaths);
         }
       }
 
@@ -457,8 +483,8 @@ class FileImportService {
   }) async {
     try {
       // Request permissions
-      final permissions = await _permissionService.requestAllMediaPermissions();
-      if (!permissions.mediaGranted) {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.hasAccess) {
         return ImportResult(
           success: false,
           error: 'Media permission denied',
@@ -480,10 +506,17 @@ class FileImportService {
         );
       }
 
+      // Get matching assets for deletion
+      List<AssetEntity> assetsToDelete = [];
+      if (deleteOriginals) {
+        assetsToDelete = await _findMatchingAssets(
+          result.files.map((f) => f.name).toList(),
+          RequestType.common,
+        );
+      }
+
       // Convert to FileToVault list
       final filesToVault = <FileToVault>[];
-      final originalPaths = <String>[];
-
       for (final file in result.files) {
         if (file.path == null) continue;
 
@@ -497,7 +530,6 @@ class FileImportService {
           type: type,
           mimeType: mimeType,
         ));
-        originalPaths.add(file.path!);
       }
 
       // Add to vault
@@ -508,15 +540,15 @@ class FileImportService {
       );
 
       // Delete from gallery if requested
-      if (deleteOriginals && imported.isNotEmpty) {
-        await _deleteFromGallery(originalPaths);
+      if (deleteOriginals && imported.isNotEmpty && assetsToDelete.isNotEmpty) {
+        await _deleteAssetsFromGallery(assetsToDelete);
       }
 
       return ImportResult(
         success: true,
         importedFiles: imported,
         message: 'Imported ${imported.length} media file(s)',
-        deletedOriginals: deleteOriginals,
+        deletedOriginals: deleteOriginals && assetsToDelete.isNotEmpty,
       );
     } catch (e) {
       debugPrint('Error importing media: $e');
@@ -528,52 +560,103 @@ class FileImportService {
     }
   }
 
-  /// Delete files from the device gallery using photo_manager
-  Future<void> _deleteFromGallery(List<String> paths) async {
+  /// Find matching assets in the gallery by filename
+  Future<List<AssetEntity>> _findMatchingAssets(
+    List<String> fileNames,
+    RequestType type,
+  ) async {
+    final matchingAssets = <AssetEntity>[];
+
     try {
-      // Request permission to delete
-      final permission = await PhotoManager.requestPermissionExtend();
-      if (!permission.hasAccess) {
-        debugPrint('No permission to delete from gallery');
-        return;
+      // Get all albums
+      final albums = await PhotoManager.getAssetPathList(type: type);
+      if (albums.isEmpty) return matchingAssets;
+
+      // Convert filenames to a set for faster lookup (with and without extension)
+      final fileNameSet = <String>{};
+      for (final name in fileNames) {
+        final lower = name.toLowerCase();
+        fileNameSet.add(lower);
+        final dotIndex = lower.lastIndexOf('.');
+        if (dotIndex > 0) {
+          fileNameSet.add(lower.substring(0, dotIndex));
+        }
       }
 
-      // Get all assets
-      final albums = await PhotoManager.getAssetPathList(type: RequestType.all);
-      if (albums.isEmpty) return;
+      // Search through all albums
+      for (final album in albums) {
+        final count = await album.assetCountAsync;
+        if (count == 0) continue;
 
-      for (final path in paths) {
-        try {
-          // Find the asset by path
-          final file = File(path);
-          if (!await file.exists()) continue;
+        // Get assets in batches
+        const batchSize = 100;
+        for (int i = 0; i < count; i += batchSize) {
+          final assets = await album.getAssetListRange(
+            start: i,
+            end: (i + batchSize).clamp(0, count),
+          );
 
-          // Try to find and delete the asset
-          for (final album in albums) {
-            final assets = await album.getAssetListRange(start: 0, end: 10000);
-            for (final asset in assets) {
-              final assetFile = await asset.file;
-              if (assetFile?.path == path) {
-                // Delete the asset
-                final result =
-                    await PhotoManager.editor.deleteWithIds([asset.id]);
-                debugPrint('Deleted asset ${asset.id}: $result');
-                break;
+          for (final asset in assets) {
+            final title = asset.title?.toLowerCase() ?? '';
+            final titleNoExt = title.contains('.')
+                ? title.substring(0, title.lastIndexOf('.'))
+                : title;
+            if (fileNameSet.contains(title) ||
+                fileNameSet.contains(titleNoExt)) {
+              matchingAssets.add(asset);
+              // Remove from set to avoid duplicates
+              fileNameSet.remove(title);
+              fileNameSet.remove(titleNoExt);
+
+              // If we found all files, return early
+              if (fileNameSet.isEmpty) {
+                return matchingAssets;
               }
             }
           }
-
-          // Also try direct file deletion as fallback
-          if (await file.exists()) {
-            await file.delete();
-          }
-        } catch (e) {
-          debugPrint('Error deleting file from gallery: $path - $e');
         }
       }
     } catch (e) {
-      debugPrint('Error in _deleteFromGallery: $e');
+      debugPrint('Error finding matching assets: $e');
     }
+
+    return matchingAssets;
+  }
+
+  /// Delete assets from gallery using PhotoManager
+  Future<bool> _deleteAssetsFromGallery(List<AssetEntity> assets) async {
+    if (assets.isEmpty) return true;
+
+    try {
+      final ids = assets.map((a) => a.id).toList();
+      final result = await PhotoManager.editor.deleteWithIds(ids);
+      debugPrint('Deleted ${result.length} assets from gallery');
+      return result.isNotEmpty;
+    } catch (e) {
+      debugPrint('Error deleting assets from gallery: $e');
+      return false;
+    }
+  }
+
+  /// Try to get the original path from a cached/picked file path
+  Future<String?> _getOriginalPath(String cachedPath, String fileName) async {
+    // Common locations to check
+    final possibleDirs = [
+      '/storage/emulated/0/Download',
+      '/storage/emulated/0/Documents',
+      '/storage/emulated/0/DCIM',
+      '/sdcard/Download',
+      '/sdcard/Documents',
+    ];
+
+    for (final dir in possibleDirs) {
+      final possiblePath = '$dir/$fileName';
+      if (await File(possiblePath).exists()) {
+        return possiblePath;
+      }
+    }
+
+    return null;
   }
 
   /// Delete files directly (for non-gallery files)
@@ -583,6 +666,7 @@ class FileImportService {
         final file = File(path);
         if (await file.exists()) {
           await file.delete();
+          debugPrint('Deleted file: $path');
         }
       } catch (e) {
         debugPrint('Error deleting file: $path - $e');

@@ -314,6 +314,9 @@ class VaultService {
         return null;
       }
 
+      // Ensure settings are loaded so encryption/secure-delete flags are applied
+      _cachedSettings ??= await _loadSettings();
+
       final directory = isDecoy
           ? await _ensureDecoyDirectory()
           : await _ensureVaultDirectory();
@@ -415,6 +418,8 @@ class VaultService {
     bool isDecoy = false,
     Function(int current, int total)? onProgress,
   }) async {
+    // Load settings once before processing the batch
+    _cachedSettings ??= await _loadSettings();
     final results = <VaultedFile>[];
 
     for (int i = 0; i < files.length; i++) {

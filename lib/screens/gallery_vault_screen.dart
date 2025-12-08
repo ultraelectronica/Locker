@@ -1794,6 +1794,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     });
 
     final result = await _importService.importImagesFromGallery(
+      deleteOriginals: true, // Hide from gallery
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
@@ -1805,7 +1806,10 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Imported ${result.importedCount} image(s)');
+      final msg = result.deletedOriginals
+          ? 'Imported and hidden ${result.importedCount} image(s)'
+          : 'Imported ${result.importedCount} image(s)';
+      ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
@@ -1823,6 +1827,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     });
 
     final result = await _importService.importVideosFromGallery(
+      deleteOriginals: true, // Hide from gallery
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
@@ -1834,7 +1839,10 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Imported ${result.importedCount} video(s)');
+      final msg = result.deletedOriginals
+          ? 'Imported and hidden ${result.importedCount} video(s)'
+          : 'Imported ${result.importedCount} video(s)';
+      ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
@@ -1852,6 +1860,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     });
 
     final result = await _importService.importMediaFromGallery(
+      deleteOriginals: true, // Hide from gallery
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
@@ -1863,7 +1872,10 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Imported ${result.importedCount} file(s)');
+      final msg = result.deletedOriginals
+          ? 'Imported and hidden ${result.importedCount} file(s)'
+          : 'Imported ${result.importedCount} file(s)';
+      ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
@@ -1881,7 +1893,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Photo saved to vault');
+      ToastUtils.showSuccess('Photo captured and hidden');
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Capture failed');
@@ -1897,7 +1909,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Video saved to vault');
+      ToastUtils.showSuccess('Video recorded and hidden');
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Recording failed');
@@ -1913,6 +1925,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     });
 
     final result = await _importService.importDocuments(
+      deleteOriginals: true, // Hide from file manager
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
@@ -1924,7 +1937,10 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Imported ${result.importedCount} document(s)');
+      final msg = result.deletedOriginals
+          ? 'Imported and hidden ${result.importedCount} document(s)'
+          : 'Imported ${result.importedCount} document(s)';
+      ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
@@ -1942,6 +1958,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     });
 
     final result = await _importService.importAnyFiles(
+      deleteOriginals: true, // Hide originals
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
@@ -1953,7 +1970,10 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      ToastUtils.showSuccess('Imported ${result.importedCount} file(s)');
+      final msg = result.deletedOriginals
+          ? 'Imported and hidden ${result.importedCount} file(s)'
+          : 'Imported ${result.importedCount} file(s)';
+      ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
