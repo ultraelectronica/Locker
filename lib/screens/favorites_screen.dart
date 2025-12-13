@@ -288,11 +288,22 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen> {
 
   Widget _buildFileThumbnail(VaultedFile file) {
     if (file.isImage) {
-      return Image.file(
-        File(file.vaultPath),
-        fit: BoxFit.cover,
-        cacheWidth: 300,
-        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(file),
+      final imageFile = File(file.vaultPath);
+      return FutureBuilder<bool>(
+        future: imageFile.exists(),
+        builder: (context, snapshot) {
+          if (snapshot.data != true) {
+            return _buildPlaceholder(file);
+          }
+          return Image.file(
+            imageFile,
+            fit: BoxFit.cover,
+            cacheWidth: 300,
+            filterQuality: FilterQuality.low,
+            errorBuilder: (context, error, stackTrace) =>
+                _buildPlaceholder(file),
+          );
+        },
       );
     }
 

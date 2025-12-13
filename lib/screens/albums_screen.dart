@@ -229,12 +229,23 @@ class _AlbumsScreenState extends ConsumerState<AlbumsScreen> {
           if (snapshot.hasData && snapshot.data != null) {
             final file = snapshot.data!;
             if (file.isImage) {
-              return Image.file(
-                File(file.vaultPath),
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                errorBuilder: (_, __, ___) => _buildPlaceholderCover(album),
+              final imageFile = File(file.vaultPath);
+              return FutureBuilder<bool>(
+                future: imageFile.exists(),
+                builder: (context, existsSnapshot) {
+                  if (existsSnapshot.data != true) {
+                    return _buildPlaceholderCover(album);
+                  }
+                  return Image.file(
+                    imageFile,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    cacheWidth: 400,
+                    filterQuality: FilterQuality.low,
+                    errorBuilder: (_, __, ___) => _buildPlaceholderCover(album),
+                  );
+                },
               );
             }
           }
@@ -251,12 +262,23 @@ class _AlbumsScreenState extends ConsumerState<AlbumsScreen> {
           if (snapshot.hasData && snapshot.data!.isNotEmpty) {
             final imageFiles = snapshot.data!.where((f) => f.isImage).toList();
             if (imageFiles.isNotEmpty) {
-              return Image.file(
-                File(imageFiles.first.vaultPath),
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                errorBuilder: (_, __, ___) => _buildPlaceholderCover(album),
+              final imageFile = File(imageFiles.first.vaultPath);
+              return FutureBuilder<bool>(
+                future: imageFile.exists(),
+                builder: (context, existsSnapshot) {
+                  if (existsSnapshot.data != true) {
+                    return _buildPlaceholderCover(album);
+                  }
+                  return Image.file(
+                    imageFile,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    cacheWidth: 400,
+                    filterQuality: FilterQuality.low,
+                    errorBuilder: (_, __, ___) => _buildPlaceholderCover(album),
+                  );
+                },
               );
             }
           }
@@ -996,11 +1018,20 @@ class _ChangeCoverSheetState extends ConsumerState<_ChangeCoverSheet> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(isSelected ? 5 : 8),
               child: file.isImage
-                  ? Image.file(
-                      File(file.vaultPath),
-                      fit: BoxFit.cover,
-                      cacheWidth: 200,
-                      errorBuilder: (_, __, ___) => _buildPlaceholder(),
+                  ? FutureBuilder<bool>(
+                      future: File(file.vaultPath).exists(),
+                      builder: (context, snapshot) {
+                        if (snapshot.data != true) {
+                          return _buildPlaceholder();
+                        }
+                        return Image.file(
+                          File(file.vaultPath),
+                          fit: BoxFit.cover,
+                          cacheWidth: 200,
+                          filterQuality: FilterQuality.low,
+                          errorBuilder: (_, __, ___) => _buildPlaceholder(),
+                        );
+                      },
                     )
                   : _buildVideoPlaceholder(),
             ),

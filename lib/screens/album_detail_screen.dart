@@ -275,10 +275,22 @@ class _AlbumDetailScreenState extends ConsumerState<AlbumDetailScreen> {
 
   Widget _buildFileThumbnail(VaultedFile file) {
     if (file.isImage) {
-      return Image.file(
-        File(file.vaultPath),
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(file),
+      final imageFile = File(file.vaultPath);
+      return FutureBuilder<bool>(
+        future: imageFile.exists(),
+        builder: (context, snapshot) {
+          if (snapshot.data != true) {
+            return _buildPlaceholder(file);
+          }
+          return Image.file(
+            imageFile,
+            fit: BoxFit.cover,
+            cacheWidth: 300,
+            filterQuality: FilterQuality.low,
+            errorBuilder: (context, error, stackTrace) =>
+                _buildPlaceholder(file),
+          );
+        },
       );
     }
     return _buildPlaceholder(file);
@@ -892,11 +904,21 @@ class _AddFilesToAlbumSheetState extends ConsumerState<_AddFilesToAlbumSheet> {
 
   Widget _buildFileThumbnail(VaultedFile file) {
     if (file.isImage) {
-      return Image.file(
-        File(file.vaultPath),
-        fit: BoxFit.cover,
-        cacheWidth: 200,
-        errorBuilder: (_, __, ___) => _buildPlaceholder(file),
+      final imageFile = File(file.vaultPath);
+      return FutureBuilder<bool>(
+        future: imageFile.exists(),
+        builder: (context, snapshot) {
+          if (snapshot.data != true) {
+            return _buildPlaceholder(file);
+          }
+          return Image.file(
+            imageFile,
+            fit: BoxFit.cover,
+            cacheWidth: 200,
+            filterQuality: FilterQuality.low,
+            errorBuilder: (_, __, ___) => _buildPlaceholder(file),
+          );
+        },
       );
     }
 

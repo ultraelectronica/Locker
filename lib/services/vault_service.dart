@@ -860,6 +860,83 @@ class VaultService {
     await _saveTags();
   }
 
+  /// Create a new tag with optional color
+  Future<TagInfo> createTag(String name, [int? colorValue]) async {
+    _cachedTags ??= await _loadTags();
+
+    final normalizedName = name.toLowerCase().trim();
+    final existingIndex =
+        _cachedTags!.indexWhere((t) => t.name == normalizedName);
+
+    if (existingIndex != -1) {
+      // Tag already exists, just update color if provided
+      if (colorValue != null) {
+        _cachedTags![existingIndex] = TagInfo(
+          name: normalizedName,
+          colorValue: colorValue,
+          usageCount: _cachedTags![existingIndex].usageCount,
+        );
+        await _saveTags();
+      }
+      return _cachedTags![existingIndex];
+    }
+
+    // Create new tag
+    final newTag = TagInfo(
+      name: normalizedName,
+      colorValue: colorValue ?? 0xFF1976D2,
+      usageCount: 0,
+    );
+    _cachedTags!.add(newTag);
+    await _saveTags();
+
+    return newTag;
+  }
+
+  /// Update a tag's color
+  Future<bool> updateTagColor(String tagName, int colorValue) async {
+    _cachedTags ??= await _loadTags();
+
+    final normalizedName = tagName.toLowerCase().trim();
+    final index = _cachedTags!.indexWhere((t) => t.name == normalizedName);
+
+    if (index == -1) return false;
+
+    _cachedTags![index] = TagInfo(
+      name: normalizedName,
+      colorValue: colorValue,
+      usageCount: _cachedTags![index].usageCount,
+    );
+    await _saveTags();
+
+    return true;
+  }
+
+  /// Delete a tag and remove it from all files
+  Future<bool> deleteTag(String tagName) async {
+    try {
+      final normalizedName = tagName.toLowerCase().trim();
+
+      // Remove tag from all files
+      final files = await getAllFiles();
+      for (final file in files) {
+        if (file.hasTag(normalizedName)) {
+          await removeTagFromFile(file.id, normalizedName);
+        }
+      }
+
+      // Remove from cached tags
+      _cachedTags ??= await _loadTags();
+      _cachedTags!.removeWhere((t) => t.name == normalizedName);
+      await _saveTags();
+
+      return true;
+    } catch (e) {
+      debugPrint('Error deleting tag: $e');
+      return false;
+    }
+  }
+
   // ========== SORTING ==========
 
   /// Sort files

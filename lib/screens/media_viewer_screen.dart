@@ -472,12 +472,20 @@ class _MediaViewerScreenState extends ConsumerState<MediaViewerScreen> {
             minScale: PhotoViewComputedScale.contained,
             maxScale: PhotoViewComputedScale.covered * 3,
             heroAttributes: PhotoViewHeroAttributes(tag: file.id),
-            child: Image.file(
-              File(file.vaultPath),
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                debugPrint('Error decoding image file: $error');
-                return _buildImageErrorPlaceholder(file);
+            child: FutureBuilder<bool>(
+              future: File(file.vaultPath).exists(),
+              builder: (context, snapshot) {
+                if (snapshot.data != true) {
+                  return _buildImageErrorPlaceholder(file);
+                }
+                return Image.file(
+                  File(file.vaultPath),
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    debugPrint('Error decoding image file: $error');
+                    return _buildImageErrorPlaceholder(file);
+                  },
+                );
               },
             ),
           ),
