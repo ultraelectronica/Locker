@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1463,9 +1464,64 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     );
 
     if (confirmed == true) {
+      // Check if still mounted after async gap
+      if (!mounted) return;
+
+      // Use a Completer to ensure dialog is shown before starting delete operation
+      final dialogContext = Completer<BuildContext>();
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          // Complete with the dialog's context once it's built
+          if (!dialogContext.isCompleted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!dialogContext.isCompleted) {
+                dialogContext.complete(ctx);
+              }
+            });
+          }
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              backgroundColor: AppColors.lightBackground,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation(AppColors.accent),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Deleting ${selectedFiles.length} file(s)...',
+                    style: TextStyle(
+                      fontFamily: 'ProductSans',
+                      color: AppColors.lightTextPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+      // Wait for the dialog to be fully rendered before starting the delete operation
+      await dialogContext.future;
+
       final success = await ref
           .read(vaultNotifierProvider.notifier)
           .deleteFiles(selectedFiles.toList());
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.pop(context);
+      }
+
+      _exitSelectionMode();
+
       if (success) {
         ToastUtils.showSuccess('Files deleted');
       } else {

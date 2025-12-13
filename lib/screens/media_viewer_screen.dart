@@ -440,12 +440,21 @@ class _MediaViewerScreenState extends ConsumerState<MediaViewerScreen> {
         if (file.isEncrypted) {
           final data = _decryptedCache[file.id];
           if (data != null) {
-            return PhotoViewGalleryPageOptions(
-              imageProvider: MemoryImage(data),
-              initialScale: PhotoViewComputedScale.contained,
-              minScale: PhotoViewComputedScale.contained,
-              maxScale: PhotoViewComputedScale.covered * 3,
-              heroAttributes: PhotoViewHeroAttributes(tag: file.id),
+            // Use customChild for encrypted images to handle decode errors
+            return PhotoViewGalleryPageOptions.customChild(
+              child: PhotoView.customChild(
+                child: Image.memory(
+                  data,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    debugPrint('Error decoding encrypted image: $error');
+                    return _buildImageErrorPlaceholder(file);
+                  },
+                ),
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 3,
+                heroAttributes: PhotoViewHeroAttributes(tag: file.id),
+              ),
             );
           }
           // Loading placeholder
@@ -456,12 +465,21 @@ class _MediaViewerScreenState extends ConsumerState<MediaViewerScreen> {
           );
         }
 
-        return PhotoViewGalleryPageOptions(
-          imageProvider: FileImage(File(file.vaultPath)),
-          initialScale: PhotoViewComputedScale.contained,
-          minScale: PhotoViewComputedScale.contained,
-          maxScale: PhotoViewComputedScale.covered * 3,
-          heroAttributes: PhotoViewHeroAttributes(tag: file.id),
+        // Use customChild with Image.file for proper error handling
+        return PhotoViewGalleryPageOptions.customChild(
+          child: PhotoView.customChild(
+            child: Image.file(
+              File(file.vaultPath),
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                debugPrint('Error decoding image file: $error');
+                return _buildImageErrorPlaceholder(file);
+              },
+            ),
+            minScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.covered * 3,
+            heroAttributes: PhotoViewHeroAttributes(tag: file.id),
+          ),
         );
       },
       itemCount: widget.files.length,
@@ -476,6 +494,50 @@ class _MediaViewerScreenState extends ConsumerState<MediaViewerScreen> {
       backgroundDecoration: const BoxDecoration(color: Colors.black),
       pageController: _pageController,
       onPageChanged: _onPageChanged,
+    );
+  }
+
+  Widget _buildImageErrorPlaceholder(VaultedFile file) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.broken_image_outlined,
+            size: 80,
+            color: Colors.white54,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            file.originalName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontFamily: 'ProductSans',
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Unable to display this image',
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 14,
+              fontFamily: 'ProductSans',
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'The file may be corrupted or in an unsupported format',
+            style: TextStyle(
+              color: Colors.white38,
+              fontSize: 12,
+              fontFamily: 'ProductSans',
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
     );
   }
 
