@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import '../services/auth_service.dart';
 import '../utils/toast_utils.dart';
-import '../themes/app_colors.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,8 +13,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController();
-  
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
+
   bool _isLoading = true;
   bool _isFirstTime = true;
   bool _isPasswordVisible = false;
@@ -67,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isEnabled = await _authService.isBiometricEnabled();
     final biometrics = await _authService.getAvailableBiometrics();
     final displayName = _authService.getBiometricDisplayName(biometrics);
-    
+
     setState(() {
       _isBiometricAvailable = isAvailable;
       _isBiometricEnabled = isEnabled;
@@ -104,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ToastUtils.showSuccess('Password created successfully');
       _passwordController.clear();
       _confirmPasswordController.clear();
-      
+
       // Check if user wants to set up biometrics
       if (_isBiometricAvailable) {
         _showBiometricSetupDialog();
@@ -244,10 +244,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // App Logo/Title
-              Icon(
-                Icons.lock,
-                size: 80,
-                color: AppColors.primaryText,
+              Image.asset(
+                'assets/padlock.png',
+                width: 100,
+                height: 100,
               ),
               const SizedBox(height: 16),
               Text(
@@ -257,7 +257,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 8),
               Text(
-                _isFirstTime ? 'Create your secure password' : 'Enter your password to continue',
+                _isFirstTime
+                    ? 'Create your secure password'
+                    : 'Enter your password to continue',
                 style: Theme.of(context).textTheme.bodyLarge,
                 textAlign: TextAlign.center,
               ),
@@ -271,7 +273,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   labelText: _isFirstTime ? 'Create Password' : 'Password',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
-                    icon: Icon(_isPasswordVisible ? Icons.visibility_off : Icons.visibility),
+                    icon: Icon(_isPasswordVisible
+                        ? Icons.visibility_off
+                        : Icons.visibility),
                     onPressed: () {
                       setState(() {
                         _isPasswordVisible = !_isPasswordVisible;
@@ -279,7 +283,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     },
                   ),
                 ),
-                onSubmitted: _isFirstTime ? null : (value) => _authenticateWithPassword(),
+                onSubmitted: _isFirstTime
+                    ? null
+                    : (value) => _authenticateWithPassword(),
               ),
               const SizedBox(height: 16),
 
@@ -292,10 +298,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     labelText: 'Confirm Password',
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      icon: Icon(_isConfirmPasswordVisible ? Icons.visibility_off : Icons.visibility),
+                      icon: Icon(_isConfirmPasswordVisible
+                          ? Icons.visibility_off
+                          : Icons.visibility),
                       onPressed: () {
                         setState(() {
-                          _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
+                          _isConfirmPasswordVisible =
+                              !_isConfirmPasswordVisible;
                         });
                       },
                     ),
@@ -309,7 +318,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
               // Primary Action Button
               ElevatedButton(
-                onPressed: _isFirstTime ? _createPassword : _authenticateWithPassword,
+                onPressed:
+                    _isFirstTime ? _createPassword : _authenticateWithPassword,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Text(
@@ -320,7 +330,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
 
               // Biometric Authentication Button (only if available and not first time)
-              if (!_isFirstTime && _isBiometricAvailable && _isBiometricEnabled) ...[
+              if (!_isFirstTime &&
+                  _isBiometricAvailable &&
+                  _isBiometricEnabled) ...[
                 const SizedBox(height: 16),
                 const Row(
                   children: [

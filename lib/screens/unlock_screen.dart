@@ -143,16 +143,16 @@ class _UnlockScreenState extends State<UnlockScreen> {
               // App Icon/Logo
               Center(
                 child: Container(
-                  width: 80,
-                  height: 80,
+                  width: 100,
+                  height: 100,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: AppColors.accent,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(24),
                   ),
-                  child: Icon(
-                    Icons.lock_outlined,
-                    size: 48,
-                    color: Colors.white,
+                  child: Image.asset(
+                    'assets/padlock.png',
+                    fit: BoxFit.contain,
                   ),
                 ),
               ),

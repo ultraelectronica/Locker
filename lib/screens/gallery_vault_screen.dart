@@ -914,41 +914,59 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
       backgroundColor: AppColors.lightBackground,
       child: Column(
         children: [
-          DrawerHeader(
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
             decoration: BoxDecoration(
               color: AppColors.accent,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const Icon(Icons.lock, size: 48, color: Colors.white),
-                const SizedBox(height: 12),
-                const Text(
-                  'Locker',
-                  style: TextStyle(
-                    fontFamily: 'ProductSans',
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Image.asset(
+                      'assets/padlock.png',
+                      fit: BoxFit.contain,
+                    ),
                   ),
-                ),
-                Consumer(
-                  builder: (context, ref, _) {
-                    final storageAsync = ref.watch(formattedStorageProvider);
-                    final countAsync = ref.watch(fileCountSummaryProvider);
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Locker',
+                    style: TextStyle(
+                      fontFamily: 'ProductSans',
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final storageAsync = ref.watch(formattedStorageProvider);
+                      final countAsync = ref.watch(fileCountSummaryProvider);
 
-                    return Text(
-                      '${countAsync.value ?? '...'} • ${storageAsync.value ?? '...'}',
-                      style: TextStyle(
-                        fontFamily: 'ProductSans',
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontSize: 14,
-                      ),
-                    );
-                  },
-                ),
-              ],
+                      return Text(
+                        '${countAsync.value ?? '...'} • ${storageAsync.value ?? '...'}',
+                        style: TextStyle(
+                          fontFamily: 'ProductSans',
+                          color: Colors.white.withValues(alpha: 0.8),
+                          fontSize: 14,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
           ListTile(
