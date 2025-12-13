@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,8 +9,14 @@ import '../services/file_import_service.dart';
 import '../themes/app_colors.dart';
 import '../utils/toast_utils.dart';
 import 'albums_screen.dart';
+import 'favorites_screen.dart';
+import 'tags_screen.dart';
 import 'media_viewer_screen.dart';
 import 'document_viewer_screen.dart';
+import '../widgets/permission_warning_banner.dart';
+import 'media_picker_screen.dart';
+import 'document_picker_screen.dart';
+import 'package:photo_manager/photo_manager.dart' hide AlbumType;
 
 /// Gallery vault screen - main screen after authentication
 class GalleryVaultScreen extends ConsumerStatefulWidget {
@@ -60,6 +67,8 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
       appBar: _buildAppBar(isSelectionMode, selectedFiles),
       body: Column(
         children: [
+          // Permission warning banner for All Files Access
+          const PermissionWarningBanner(),
           if (_isImporting) _buildImportProgress(),
           if (_isSearching) _buildSearchBar(),
           _buildTabBar(filesAsync),
@@ -98,6 +107,11 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.visibility_outlined, color: Colors.white),
+            onPressed: () => _unhideSelectedFiles(selectedFiles),
+            tooltip: 'Unhide (restore to gallery)',
+          ),
           IconButton(
             icon: const Icon(Icons.folder_outlined, color: Colors.white),
             onPressed: () => _showAddToAlbumSheet(selectedFiles),
@@ -612,13 +626,74 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
   }
 
   Widget _buildFileThumbnail(VaultedFile file) {
-    if (file.isImage && !file.isEncrypted) {
-      return Image.file(
-        File(file.vaultPath),
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(file),
+    // Show image thumbnail
+    if (file.isImage) {
+      final imageFile = File(file.vaultPath);
+
+      // Use FutureBuilder to check file existence first
+      return FutureBuilder<bool>(
+        future: imageFile.exists(),
+        builder: (context, snapshot) {
+          if (snapshot.data != true) {
+            return _buildPlaceholder(file);
+          }
+
+          // Use Image.file with defensive error handling
+          return Image.file(
+            imageFile,
+            fit: BoxFit.cover,
+            cacheWidth: 300, // Limit resolution for performance
+            filterQuality: FilterQuality.low,
+            gaplessPlayback: true,
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              if (wasSynchronouslyLoaded || frame != null) {
+                return child;
+              }
+              // Show placeholder while loading
+              return Container(
+                color: Colors.grey.shade200,
+                child: const Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  ),
+                ),
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              // Log error for debugging but show placeholder gracefully
+              debugPrint('Error loading image: ${file.originalName} - $error');
+              return _buildPlaceholder(file);
+            },
+          );
+        },
       );
     }
+
+    // Show video thumbnail (first frame preview)
+    if (file.isVideo) {
+      // Try to show video thumbnail from the vault path
+      // Videos don't have a simple thumbnail, so we use a styled placeholder
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(
+            color: Colors.black87,
+            child: const Center(
+              child: Icon(
+                Icons.play_circle_outline,
+                size: 48,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return _buildPlaceholder(file);
   }
 
@@ -626,28 +701,23 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     IconData icon;
     Color color;
 
-    if (file.isEncrypted) {
-      icon = Icons.lock;
-      color = Colors.green;
-    } else {
-      switch (file.type) {
-        case VaultedFileType.image:
-          icon = Icons.image;
-          color = Colors.blue;
-          break;
-        case VaultedFileType.video:
-          icon = Icons.videocam;
-          color = Colors.red;
-          break;
-        case VaultedFileType.document:
-          icon = _getDocumentIcon(file.extension);
-          color = _getDocumentColor(file.extension);
-          break;
-        case VaultedFileType.other:
-          icon = Icons.insert_drive_file;
-          color = Colors.grey;
-          break;
-      }
+    switch (file.type) {
+      case VaultedFileType.image:
+        icon = Icons.image;
+        color = Colors.blue;
+        break;
+      case VaultedFileType.video:
+        icon = Icons.videocam;
+        color = Colors.red;
+        break;
+      case VaultedFileType.document:
+        icon = _getDocumentIcon(file.extension);
+        color = _getDocumentColor(file.extension);
+        break;
+      case VaultedFileType.other:
+        icon = Icons.insert_drive_file;
+        color = Colors.grey;
+        break;
     }
 
     return Container(
@@ -660,7 +730,7 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
-              file.isEncrypted ? 'ENCRYPTED' : file.extension.toUpperCase(),
+              file.extension.toUpperCase(),
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
@@ -884,41 +954,59 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
       backgroundColor: AppColors.lightBackground,
       child: Column(
         children: [
-          DrawerHeader(
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
             decoration: BoxDecoration(
               color: AppColors.accent,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const Icon(Icons.lock, size: 48, color: Colors.white),
-                const SizedBox(height: 12),
-                const Text(
-                  'Locker',
-                  style: TextStyle(
-                    fontFamily: 'ProductSans',
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Image.asset(
+                      'assets/padlock.png',
+                      fit: BoxFit.contain,
+                    ),
                   ),
-                ),
-                Consumer(
-                  builder: (context, ref, _) {
-                    final storageAsync = ref.watch(formattedStorageProvider);
-                    final countAsync = ref.watch(fileCountSummaryProvider);
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Locker',
+                    style: TextStyle(
+                      fontFamily: 'ProductSans',
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final storageAsync = ref.watch(formattedStorageProvider);
+                      final countAsync = ref.watch(fileCountSummaryProvider);
 
-                    return Text(
-                      '${countAsync.value ?? '...'} • ${storageAsync.value ?? '...'}',
-                      style: TextStyle(
-                        fontFamily: 'ProductSans',
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontSize: 14,
-                      ),
-                    );
-                  },
-                ),
-              ],
+                      return Text(
+                        '${countAsync.value ?? '...'} • ${storageAsync.value ?? '...'}',
+                        style: TextStyle(
+                          fontFamily: 'ProductSans',
+                          color: Colors.white.withValues(alpha: 0.8),
+                          fontSize: 14,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
           ListTile(
@@ -943,7 +1031,11 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
             ),
             onTap: () {
               Navigator.pop(context);
-              ToastUtils.showInfo('Favorites coming soon');
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const FavoritesScreen()),
+              );
             },
           ),
           ListTile(
@@ -954,7 +1046,10 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
             ),
             onTap: () {
               Navigator.pop(context);
-              _showTagsSheet();
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const TagsScreen()),
+              );
             },
           ),
           const Divider(),
@@ -1185,123 +1280,240 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.lightBackground,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.lightBorder,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          final tagsAsync = ref.watch(tagsProvider);
+
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
               ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Add Tags',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.lightTextPrimary,
-                        fontFamily: 'ProductSans',
-                      ),
+              decoration: BoxDecoration(
+                color: AppColors.lightBackground,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.lightBorder,
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: tagController,
-                      decoration: InputDecoration(
-                        hintText: 'Enter tag name',
-                        hintStyle: TextStyle(
-                          fontFamily: 'ProductSans',
-                          color: AppColors.lightTextTertiary,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Add Tags',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.lightTextPrimary,
+                            fontFamily: 'ProductSans',
+                          ),
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                        Text(
+                          '${selectedFiles.length} file(s) selected',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.lightTextSecondary,
+                            fontFamily: 'ProductSans',
+                          ),
                         ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: AppColors.accent),
-                        ),
-                        suffixIcon: IconButton(
-                          icon: Icon(Icons.add, color: AppColors.accent),
-                          onPressed: () async {
-                            final tag = tagController.text.trim();
-                            if (tag.isEmpty) return;
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: tagController,
+                          decoration: InputDecoration(
+                            hintText: 'Create new tag',
+                            hintStyle: TextStyle(
+                              fontFamily: 'ProductSans',
+                              color: AppColors.lightTextTertiary,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: AppColors.accent),
+                            ),
+                            prefixIcon: Icon(Icons.label_outline,
+                                color: AppColors.lightTextSecondary),
+                            suffixIcon: IconButton(
+                              icon: Icon(Icons.add, color: AppColors.accent),
+                              onPressed: () async {
+                                final tag = tagController.text.trim();
+                                if (tag.isEmpty) return;
 
-                            for (final fileId in selectedFiles) {
-                              await ref
-                                  .read(vaultNotifierProvider.notifier)
-                                  .addTag(fileId, tag);
-                            }
+                                // Create tag if it doesn't exist
+                                final vaultService =
+                                    ref.read(vaultServiceProvider);
+                                await vaultService.createTag(tag);
 
-                            if (!context.mounted) return;
-                            Navigator.pop(context);
-                            ToastUtils.showSuccess('Tag added');
-                            _exitSelectionMode();
-                          },
+                                for (final fileId in selectedFiles) {
+                                  await ref
+                                      .read(vaultNotifierProvider.notifier)
+                                      .addTag(fileId, tag);
+                                }
+
+                                if (!context.mounted) return;
+                                Navigator.pop(context);
+                                ref.invalidate(tagsProvider);
+                                ToastUtils.showSuccess('Tag added');
+                                _exitSelectionMode();
+                              },
+                            ),
+                          ),
                         ),
-                      ),
-                      autofocus: true,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Quick Tags',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.lightTextTertiary,
-                        fontFamily: 'ProductSans',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: predefinedTags
-                          .map((tag) => ActionChip(
-                                label: Text(
-                                  tag,
-                                  style: const TextStyle(
-                                    fontFamily: 'ProductSans',
-                                    fontSize: 12,
+                        const SizedBox(height: 16),
+                        Text(
+                          'Existing Tags',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.lightTextTertiary,
+                            fontFamily: 'ProductSans',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        tagsAsync.when(
+                          loading: () => const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ),
+                          ),
+                          error: (_, __) => Text(
+                            'Failed to load tags',
+                            style: TextStyle(
+                              fontFamily: 'ProductSans',
+                              color: AppColors.lightTextSecondary,
+                            ),
+                          ),
+                          data: (tags) {
+                            if (tags.isEmpty) {
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                  child: Text(
+                                    'No tags yet. Create one above!',
+                                    style: TextStyle(
+                                      fontFamily: 'ProductSans',
+                                      color: AppColors.lightTextTertiary,
+                                    ),
                                   ),
                                 ),
-                                onPressed: () async {
-                                  for (final fileId in selectedFiles) {
-                                    await ref
-                                        .read(vaultNotifierProvider.notifier)
-                                        .addTag(fileId, tag);
-                                  }
+                              );
+                            }
+                            return Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: tags
+                                  .map((tag) => ActionChip(
+                                        avatar: Container(
+                                          width: 12,
+                                          height: 12,
+                                          decoration: BoxDecoration(
+                                            color: Color(tag.colorValue),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        label: Text(
+                                          tag.name,
+                                          style: const TextStyle(
+                                            fontFamily: 'ProductSans',
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        onPressed: () async {
+                                          for (final fileId in selectedFiles) {
+                                            await ref
+                                                .read(vaultNotifierProvider
+                                                    .notifier)
+                                                .addTag(fileId, tag.name);
+                                          }
 
-                                  if (!context.mounted) return;
-                                  Navigator.pop(context);
-                                  ToastUtils.showSuccess('Tag added');
-                                  _exitSelectionMode();
-                                },
-                              ))
-                          .toList(),
+                                          if (!context.mounted) return;
+                                          Navigator.pop(context);
+                                          ref.invalidate(tagsProvider);
+                                          ToastUtils.showSuccess('Tag added');
+                                          _exitSelectionMode();
+                                        },
+                                      ))
+                                  .toList(),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Quick Tags',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.lightTextTertiary,
+                            fontFamily: 'ProductSans',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: predefinedTags
+                              .map((tag) => ActionChip(
+                                    label: Text(
+                                      tag,
+                                      style: const TextStyle(
+                                        fontFamily: 'ProductSans',
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    onPressed: () async {
+                                      // Create tag if doesn't exist
+                                      final vaultService =
+                                          ref.read(vaultServiceProvider);
+                                      await vaultService.createTag(tag);
+
+                                      for (final fileId in selectedFiles) {
+                                        await ref
+                                            .read(
+                                                vaultNotifierProvider.notifier)
+                                            .addTag(fileId, tag);
+                                      }
+
+                                      if (!context.mounted) return;
+                                      Navigator.pop(context);
+                                      ref.invalidate(tagsProvider);
+                                      ToastUtils.showSuccess('Tag added');
+                                      _exitSelectionMode();
+                                    },
+                                  ))
+                              .toList(),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  SizedBox(height: MediaQuery.of(context).padding.bottom),
+                ],
               ),
-              SizedBox(height: MediaQuery.of(context).padding.bottom),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1312,6 +1524,81 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     }
     ToastUtils.showSuccess('Favorites updated');
     _exitSelectionMode();
+  }
+
+  Future<void> _unhideSelectedFiles(Set<String> selectedFiles) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.lightBackground,
+        title: Text(
+          'Unhide Files',
+          style: TextStyle(
+            fontFamily: 'ProductSans',
+            color: AppColors.lightTextPrimary,
+          ),
+        ),
+        content: Text(
+          'Are you sure you want to unhide ${selectedFiles.length} file(s)? This will restore them to your device gallery (DCIM/Restored folder) and remove them from the vault.',
+          style: TextStyle(
+            fontFamily: 'ProductSans',
+            color: AppColors.lightTextSecondary,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                fontFamily: 'ProductSans',
+                color: AppColors.lightTextSecondary,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Unhide',
+              style: TextStyle(
+                fontFamily: 'ProductSans',
+                color: AppColors.accent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      setState(() {
+        _isImporting = true;
+        _importProgress = 0;
+        _importTotal = selectedFiles.length;
+      });
+
+      final result = await _importService.unhideFiles(
+        fileIds: selectedFiles.toList(),
+        removeFromVault: true,
+        onProgress: (current, total) {
+          setState(() {
+            _importProgress = current;
+            _importTotal = total;
+          });
+        },
+      );
+
+      setState(() => _isImporting = false);
+      _exitSelectionMode();
+
+      if (result.success && result.unhiddenCount > 0) {
+        ToastUtils.showSuccess(result.message ?? 'Files restored to gallery');
+        ref.read(vaultNotifierProvider.notifier).loadFiles();
+      } else if (!result.success) {
+        ToastUtils.showError(result.error ?? 'Failed to unhide files');
+      }
+    }
   }
 
   Future<void> _deleteSelectedFiles(Set<String> selectedFiles) async {
@@ -1359,98 +1646,70 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     );
 
     if (confirmed == true) {
+      // Check if still mounted after async gap
+      if (!mounted) return;
+
+      // Use a Completer to ensure dialog is shown before starting delete operation
+      final dialogContext = Completer<BuildContext>();
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          // Complete with the dialog's context once it's built
+          if (!dialogContext.isCompleted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!dialogContext.isCompleted) {
+                dialogContext.complete(ctx);
+              }
+            });
+          }
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              backgroundColor: AppColors.lightBackground,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation(AppColors.accent),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Deleting ${selectedFiles.length} file(s)...',
+                    style: TextStyle(
+                      fontFamily: 'ProductSans',
+                      color: AppColors.lightTextPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+      // Wait for the dialog to be fully rendered before starting the delete operation
+      await dialogContext.future;
+
       final success = await ref
           .read(vaultNotifierProvider.notifier)
           .deleteFiles(selectedFiles.toList());
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.pop(context);
+      }
+
+      _exitSelectionMode();
+
       if (success) {
         ToastUtils.showSuccess('Files deleted');
       } else {
         ToastUtils.showError('Failed to delete some files');
       }
     }
-  }
-
-  void _showTagsSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Consumer(
-        builder: (context, ref, _) {
-          final tagsAsync = ref.watch(tagsProvider);
-
-          return Container(
-            decoration: BoxDecoration(
-              color: AppColors.lightBackground,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.lightBorder,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Tags',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.lightTextPrimary,
-                          fontFamily: 'ProductSans',
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      tagsAsync.when(
-                        loading: () =>
-                            const Center(child: CircularProgressIndicator()),
-                        error: (_, __) => const Text('Failed to load tags'),
-                        data: (tags) => tags.isEmpty
-                            ? Center(
-                                child: Text(
-                                  'No tags yet',
-                                  style: TextStyle(
-                                    fontFamily: 'ProductSans',
-                                    color: AppColors.lightTextTertiary,
-                                  ),
-                                ),
-                              )
-                            : Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: tags
-                                    .map((tag) => Chip(
-                                          label: Text(
-                                            '${tag.name} (${tag.usageCount})',
-                                            style: const TextStyle(
-                                              fontFamily: 'ProductSans',
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ))
-                                    .toList(),
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: MediaQuery.of(context).padding.bottom),
-              ],
-            ),
-          );
-        },
-      ),
-    );
   }
 
   void _showSettingsSheet() {
@@ -1787,13 +2046,31 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
   // Import methods
   Future<void> _importImagesFromGallery() async {
     Navigator.pop(context);
+
+    // Open custom media picker for images
+    final selectedAssets = await Navigator.push<List<AssetEntity>?>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MediaPickerScreen(
+          requestType: RequestType.image,
+          title: 'Select Images to Hide',
+        ),
+      ),
+    );
+
+    if (selectedAssets == null || selectedAssets.isEmpty) {
+      ToastUtils.showInfo('No images selected');
+      return;
+    }
+
     setState(() {
       _isImporting = true;
       _importProgress = 0;
-      _importTotal = 0;
+      _importTotal = selectedAssets.length;
     });
 
-    final result = await _importService.importImagesFromGallery(
+    final result = await _importService.importFromAssets(
+      assets: selectedAssets,
       deleteOriginals: true, // Hide from gallery
       onProgress: (current, total) {
         setState(() {
@@ -1808,25 +2085,41 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     if (result.success && result.importedCount > 0) {
       final msg = result.deletedOriginals
           ? 'Imported and hidden ${result.importedCount} image(s)'
-          : 'Imported ${result.importedCount} image(s)';
+          : 'Imported ${result.importedCount} image(s) (originals may still be visible)';
       ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
-    } else {
-      ToastUtils.showInfo('No images selected');
     }
   }
 
   Future<void> _importVideosFromGallery() async {
     Navigator.pop(context);
+
+    // Open custom media picker for videos
+    final selectedAssets = await Navigator.push<List<AssetEntity>?>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MediaPickerScreen(
+          requestType: RequestType.video,
+          title: 'Select Videos to Hide',
+        ),
+      ),
+    );
+
+    if (selectedAssets == null || selectedAssets.isEmpty) {
+      ToastUtils.showInfo('No videos selected');
+      return;
+    }
+
     setState(() {
       _isImporting = true;
       _importProgress = 0;
-      _importTotal = 0;
+      _importTotal = selectedAssets.length;
     });
 
-    final result = await _importService.importVideosFromGallery(
+    final result = await _importService.importFromAssets(
+      assets: selectedAssets,
       deleteOriginals: true, // Hide from gallery
       onProgress: (current, total) {
         setState(() {
@@ -1841,25 +2134,41 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     if (result.success && result.importedCount > 0) {
       final msg = result.deletedOriginals
           ? 'Imported and hidden ${result.importedCount} video(s)'
-          : 'Imported ${result.importedCount} video(s)';
+          : 'Imported ${result.importedCount} video(s) (originals may still be visible)';
       ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
-    } else {
-      ToastUtils.showInfo('No videos selected');
     }
   }
 
   Future<void> _importMediaFromGallery() async {
     Navigator.pop(context);
+
+    // Open custom media picker for all media (images and videos)
+    final selectedAssets = await Navigator.push<List<AssetEntity>?>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MediaPickerScreen(
+          requestType: RequestType.common,
+          title: 'Select Media to Hide',
+        ),
+      ),
+    );
+
+    if (selectedAssets == null || selectedAssets.isEmpty) {
+      ToastUtils.showInfo('No media selected');
+      return;
+    }
+
     setState(() {
       _isImporting = true;
       _importProgress = 0;
-      _importTotal = 0;
+      _importTotal = selectedAssets.length;
     });
 
-    final result = await _importService.importMediaFromGallery(
+    final result = await _importService.importFromAssets(
+      assets: selectedAssets,
       deleteOriginals: true, // Hide from gallery
       onProgress: (current, total) {
         setState(() {
@@ -1874,13 +2183,11 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
     if (result.success && result.importedCount > 0) {
       final msg = result.deletedOriginals
           ? 'Imported and hidden ${result.importedCount} file(s)'
-          : 'Imported ${result.importedCount} file(s)';
+          : 'Imported ${result.importedCount} file(s) (originals may still be visible)';
       ToastUtils.showSuccess(msg);
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
-    } else {
-      ToastUtils.showInfo('No media selected');
     }
   }
 
@@ -1918,13 +2225,30 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
 
   Future<void> _importDocuments() async {
     Navigator.pop(context);
+
+    // Open custom document picker
+    final selectedDocuments = await Navigator.push<List<DocumentFile>?>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const DocumentPickerScreen(
+          title: 'Select Documents to Hide',
+        ),
+      ),
+    );
+
+    if (selectedDocuments == null || selectedDocuments.isEmpty) {
+      ToastUtils.showInfo('No documents selected');
+      return;
+    }
+
     setState(() {
       _isImporting = true;
       _importProgress = 0;
-      _importTotal = 0;
+      _importTotal = selectedDocuments.length;
     });
 
-    final result = await _importService.importDocuments(
+    final result = await _importService.importFromDocumentFiles(
+      filePaths: selectedDocuments.map((d) => d.path).toList(),
       deleteOriginals: true, // Hide from file manager
       onProgress: (current, total) {
         setState(() {

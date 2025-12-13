@@ -32,6 +32,7 @@ dependencies:
   file_picker: ^10.3.7
   flutter:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.4
   flutter_riverpod: ^3.0.3
   flutter_secure_storage: ^9.2.4
   fluttertoast: ^9.0.0
@@ -54,6 +55,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/padlock.png"
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 # The following section is specific to Flutter packages.
@@ -65,6 +71,7 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
+    - assets/padlock.png
     - assets/hamster.png
     - assets/hamsterjpg.jpg
     - assets/hamster_mouse.png

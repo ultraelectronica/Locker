@@ -747,8 +747,12 @@ class VaultService {
       _cachedAlbums![albumIndex] = _cachedAlbums![albumIndex].addFile(fileId);
       await _saveAlbums();
 
-      // Update file
-      await updateFile(file.addToAlbum(albumId));
+      // Update file - also set isFavorite if adding to favorites album
+      VaultedFile updatedFile = file.addToAlbum(albumId);
+      if (albumId == 'favorites') {
+        updatedFile = updatedFile.copyWith(isFavorite: true);
+      }
+      await updateFile(updatedFile);
 
       return true;
     } catch (e) {
@@ -769,10 +773,14 @@ class VaultService {
           _cachedAlbums![albumIndex].removeFile(fileId);
       await _saveAlbums();
 
-      // Update file
+      // Update file - also unset isFavorite if removing from favorites album
       final file = await getFileById(fileId);
       if (file != null) {
-        await updateFile(file.removeFromAlbum(albumId));
+        VaultedFile updatedFile = file.removeFromAlbum(albumId);
+        if (albumId == 'favorites') {
+          updatedFile = updatedFile.copyWith(isFavorite: false);
+        }
+        await updateFile(updatedFile);
       }
 
       return true;
@@ -852,6 +860,83 @@ class VaultService {
     await _saveTags();
   }
 
+  /// Create a new tag with optional color
+  Future<TagInfo> createTag(String name, [int? colorValue]) async {
+    _cachedTags ??= await _loadTags();
+
+    final normalizedName = name.toLowerCase().trim();
+    final existingIndex =
+        _cachedTags!.indexWhere((t) => t.name == normalizedName);
+
+    if (existingIndex != -1) {
+      // Tag already exists, just update color if provided
+      if (colorValue != null) {
+        _cachedTags![existingIndex] = TagInfo(
+          name: normalizedName,
+          colorValue: colorValue,
+          usageCount: _cachedTags![existingIndex].usageCount,
+        );
+        await _saveTags();
+      }
+      return _cachedTags![existingIndex];
+    }
+
+    // Create new tag
+    final newTag = TagInfo(
+      name: normalizedName,
+      colorValue: colorValue ?? 0xFF1976D2,
+      usageCount: 0,
+    );
+    _cachedTags!.add(newTag);
+    await _saveTags();
+
+    return newTag;
+  }
+
+  /// Update a tag's color
+  Future<bool> updateTagColor(String tagName, int colorValue) async {
+    _cachedTags ??= await _loadTags();
+
+    final normalizedName = tagName.toLowerCase().trim();
+    final index = _cachedTags!.indexWhere((t) => t.name == normalizedName);
+
+    if (index == -1) return false;
+
+    _cachedTags![index] = TagInfo(
+      name: normalizedName,
+      colorValue: colorValue,
+      usageCount: _cachedTags![index].usageCount,
+    );
+    await _saveTags();
+
+    return true;
+  }
+
+  /// Delete a tag and remove it from all files
+  Future<bool> deleteTag(String tagName) async {
+    try {
+      final normalizedName = tagName.toLowerCase().trim();
+
+      // Remove tag from all files
+      final files = await getAllFiles();
+      for (final file in files) {
+        if (file.hasTag(normalizedName)) {
+          await removeTagFromFile(file.id, normalizedName);
+        }
+      }
+
+      // Remove from cached tags
+      _cachedTags ??= await _loadTags();
+      _cachedTags!.removeWhere((t) => t.name == normalizedName);
+      await _saveTags();
+
+      return true;
+    } catch (e) {
+      debugPrint('Error deleting tag: $e');
+      return false;
+    }
+  }
+
   // ========== SORTING ==========
 
   /// Sort files
@@ -907,20 +992,25 @@ class VaultService {
     final file = await getFileById(fileId);
     if (file == null) return null;
 
-    final updatedFile = file.toggleFavorite();
-    await updateFile(updatedFile);
-
-    // Update favorites album
+    // Update favorites album - this will also update the isFavorite flag
     final favoritesAlbum = await getAlbumById('favorites');
     if (favoritesAlbum != null) {
-      if (updatedFile.isFavorite) {
-        await addFileToAlbum(fileId, 'favorites');
-      } else {
+      if (file.isFavorite) {
+        // Currently favorite, so remove from favorites
         await removeFileFromAlbum(fileId, 'favorites');
+      } else {
+        // Not favorite, so add to favorites
+        await addFileToAlbum(fileId, 'favorites');
       }
+    } else {
+      // No favorites album exists, just toggle the flag directly
+      final updatedFile = file.toggleFavorite();
+      await updateFile(updatedFile);
+      return updatedFile;
     }
 
-    return updatedFile;
+    // Return the updated file
+    return await getFileById(fileId);
   }
 
   /// Get favorite files
