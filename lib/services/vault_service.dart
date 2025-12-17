@@ -300,6 +300,12 @@ class VaultService {
     }
   }
 
+  /// Stream copy a file in chunks (memory-efficient for large files)
+  Future<void> _streamCopyFile(File source, File destination) async {
+    final sink = destination.openWrite();
+    await source.openRead().pipe(sink);
+  }
+
   /// Generate a unique encrypted filename
   String _generateVaultFilename(String originalName) {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -344,14 +350,28 @@ class VaultService {
 
       String? encryptionIv;
       int fileSize;
+      fileSize = await sourceFile.length();
+
+      // Use streaming for large files (>10MB) to avoid UI blocking
+      const largeFileThreshold = 10 * 1024 * 1024; // 10MB
+      final isLargeFile = fileSize > largeFileThreshold;
 
       if (encrypt || _cachedSettings?.encryptionEnabled == true) {
-        // Encrypt the file
-        final encResult = await _encryptionService.encryptFile(
-          sourcePath,
-          vaultPath,
-          isDecoy: isDecoy,
-        );
+        // Encrypt the file - use streaming for large files
+        FileEncryptionResult encResult;
+        if (isLargeFile) {
+          encResult = await _encryptionService.encryptFileStreamed(
+            sourcePath,
+            vaultPath,
+            isDecoy: isDecoy,
+          );
+        } else {
+          encResult = await _encryptionService.encryptFile(
+            sourcePath,
+            vaultPath,
+            isDecoy: isDecoy,
+          );
+        }
 
         if (!encResult.success) {
           debugPrint('Encryption failed: ${encResult.error}');
@@ -359,11 +379,15 @@ class VaultService {
         }
 
         encryptionIv = encResult.iv;
-        fileSize = encResult.originalSize ?? await sourceFile.length();
+        fileSize = encResult.originalSize ?? fileSize;
       } else {
         // Copy file to vault without encryption
-        await sourceFile.copy(vaultPath);
-        fileSize = await sourceFile.length();
+        if (isLargeFile) {
+          // Stream copy for large files to avoid blocking
+          await _streamCopyFile(sourceFile, File(vaultPath));
+        } else {
+          await sourceFile.copy(vaultPath);
+        }
       }
 
       final fileId = sha256
@@ -610,7 +634,9 @@ class VaultService {
     if (vaultedFile == null) return null;
 
     if (vaultedFile.isEncrypted && vaultedFile.encryptionIv != null) {
-      final result = await _encryptionService.decryptFileToMemory(
+      // Use decryptStreamedFileToMemory which auto-detects format
+      // (legacy CBC vs new CTR streamed encryption)
+      final result = await _encryptionService.decryptStreamedFileToMemory(
         vaultedFile.vaultPath,
         vaultedFile.encryptionIv!,
         isDecoy: isDecoy,
