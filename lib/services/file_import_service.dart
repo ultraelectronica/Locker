@@ -3,8 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../models/vaulted_file.dart';
+import 'office_converter_service.dart';
 import 'permission_service.dart';
 import 'vault_service.dart';
 
@@ -798,6 +800,289 @@ class FileImportService {
     }
   }
 
+  /// Import documents from file paths with Office document conversion
+  /// Office documents (docx, odt, rtf) will be converted to PDF before storing
+  /// Returns OfficeConversionInfo for files that need conversion confirmation
+  Future<OfficeImportResult> importFromDocumentFilesWithConversion({
+    required List<String> filePaths,
+    required Future<bool> Function(List<OfficeFileInfo> officeFiles)
+        onConversionConfirmation,
+    bool deleteOriginals = true,
+    Function(int current, int total)? onProgress,
+    Function(String message)? onStatusUpdate,
+  }) async {
+    if (filePaths.isEmpty) {
+      return OfficeImportResult(
+        success: true,
+        importedFiles: [],
+        convertedFiles: [],
+        skippedFiles: [],
+        message: 'No documents selected',
+      );
+    }
+
+    try {
+      debugPrint(
+          '[FileImport] Processing ${filePaths.length} documents for import');
+
+      // Separate Office documents from regular files
+      final officeFiles = <OfficeFileInfo>[];
+      final regularFilePaths = <String>[];
+
+      for (final path in filePaths) {
+        final ext = path.split('.').last.toLowerCase();
+        if (OfficeConverterService.isOfficeDocument(ext)) {
+          final fileName = path.split('/').last;
+          final canConvert = OfficeConverterService.canConvertOnDevice(ext);
+          officeFiles.add(OfficeFileInfo(
+            path: path,
+            fileName: fileName,
+            extension: ext,
+            canConvertOnDevice: canConvert,
+          ));
+        } else {
+          regularFilePaths.add(path);
+        }
+      }
+
+      debugPrint(
+          '[FileImport] Found ${officeFiles.length} Office documents, ${regularFilePaths.length} regular files');
+
+      // Ask for confirmation if there are Office documents to convert
+      bool conversionConfirmed = true;
+      if (officeFiles.isNotEmpty) {
+        conversionConfirmed = await onConversionConfirmation(officeFiles);
+        if (!conversionConfirmed) {
+          return OfficeImportResult(
+            success: false,
+            importedFiles: [],
+            convertedFiles: [],
+            skippedFiles: officeFiles.map((f) => f.fileName).toList(),
+            message: 'Conversion cancelled by user',
+          );
+        }
+      }
+
+      final filesToVault = <FileToVault>[];
+      final pathsToDelete = <String>[];
+      final convertedFiles = <String>[];
+      final skippedFiles = <String>[];
+      int processed = 0;
+      final totalFiles = regularFilePaths.length + officeFiles.length;
+
+      // Process regular files first
+      for (final path in regularFilePaths) {
+        try {
+          final file = File(path);
+          if (!await file.exists()) {
+            debugPrint('[FileImport] File does not exist: $path');
+            continue;
+          }
+
+          final fileName = path.split('/').last;
+          final mimeType = lookupMimeType(path) ?? 'application/octet-stream';
+
+          filesToVault.add(FileToVault(
+            sourcePath: path,
+            originalName: fileName,
+            type: VaultedFileType.document,
+            mimeType: mimeType,
+          ));
+
+          pathsToDelete.add(path);
+          processed++;
+          onProgress?.call(processed, totalFiles);
+
+          debugPrint(
+              '[FileImport] Prepared regular document for import: $fileName');
+        } catch (e) {
+          debugPrint('[FileImport] Error processing document $path: $e');
+        }
+      }
+
+      // Process Office documents with conversion
+      final converter = OfficeConverterService();
+      final tempDir = await getTemporaryDirectory();
+
+      for (final officeFile in officeFiles) {
+        try {
+          if (!officeFile.canConvertOnDevice) {
+            // Cannot convert on device, import original
+            debugPrint(
+                '[FileImport] Importing original (non-convertible): ${officeFile.fileName}');
+
+            final mimeType =
+                lookupMimeType(officeFile.path) ?? 'application/octet-stream';
+            filesToVault.add(FileToVault(
+              sourcePath: officeFile.path,
+              originalName: officeFile.fileName,
+              type: VaultedFileType.document,
+              mimeType: mimeType,
+            ));
+
+            pathsToDelete.add(officeFile.path);
+            processed++;
+            onProgress?.call(processed, totalFiles);
+            continue;
+          }
+
+          onStatusUpdate?.call('Converting ${officeFile.fileName}...');
+
+          final file = File(officeFile.path);
+          if (!await file.exists()) {
+            debugPrint(
+                '[FileImport] Office file does not exist: ${officeFile.path}');
+            skippedFiles.add(officeFile.fileName);
+            processed++;
+            onProgress?.call(processed, totalFiles);
+            continue;
+          }
+
+          // Read file data
+          final fileData = await file.readAsBytes();
+
+          // Convert to PDF
+          final result = await converter.convertToPdf(
+            Uint8List.fromList(fileData),
+            officeFile.fileName,
+            officeFile.extension,
+          );
+
+          if (result.success && result.pdfData != null) {
+            // Save converted PDF to temp location
+            final pdfFileName =
+                '${officeFile.fileName.replaceAll(RegExp(r'\.[^.]+$'), '')}.pdf';
+            final tempPdfPath = '${tempDir.path}/$pdfFileName';
+            await File(tempPdfPath).writeAsBytes(result.pdfData!);
+
+            filesToVault.add(FileToVault(
+              sourcePath: tempPdfPath,
+              originalName: pdfFileName,
+              type: VaultedFileType.document,
+              mimeType: 'application/pdf',
+            ));
+
+            pathsToDelete.add(officeFile.path);
+            convertedFiles.add('${officeFile.fileName} → $pdfFileName');
+
+            debugPrint(
+                '[FileImport] Converted and prepared: ${officeFile.fileName} -> $pdfFileName');
+          } else {
+            debugPrint(
+                '[FileImport] Failed to convert: ${officeFile.fileName} - ${result.error}');
+            debugPrint('[FileImport] Fallback: Importing original file');
+
+            // Fallback to original file
+            final mimeType =
+                lookupMimeType(officeFile.path) ?? 'application/octet-stream';
+            filesToVault.add(FileToVault(
+              sourcePath: officeFile.path,
+              originalName: officeFile.fileName,
+              type: VaultedFileType.document,
+              mimeType: mimeType,
+            ));
+
+            pathsToDelete.add(officeFile.path);
+            // Don't add to convertedFiles, maybe add to a 'fallback' list or just implicitly handled
+          }
+
+          processed++;
+          onProgress?.call(processed, totalFiles);
+        } catch (e) {
+          debugPrint(
+              '[FileImport] Error converting/importing ${officeFile.fileName}: $e');
+          // Try one last time to import original if generic error occurred
+          try {
+            final mimeType =
+                lookupMimeType(officeFile.path) ?? 'application/octet-stream';
+            filesToVault.add(FileToVault(
+              sourcePath: officeFile.path,
+              originalName: officeFile.fileName,
+              type: VaultedFileType.document,
+              mimeType: mimeType,
+            ));
+            pathsToDelete.add(officeFile.path);
+          } catch (e2) {
+            skippedFiles.add(officeFile.fileName);
+          }
+          processed++;
+          onProgress?.call(processed, totalFiles);
+        }
+      }
+
+      if (filesToVault.isEmpty) {
+        String errorMessage = 'Could not process any of the selected files';
+
+        if (skippedFiles.isNotEmpty) {
+          errorMessage += '. (${skippedFiles.length} files skipped/failed)';
+        }
+
+        return OfficeImportResult(
+          success: false,
+          error: errorMessage,
+          importedFiles: [],
+          convertedFiles: convertedFiles,
+          skippedFiles: skippedFiles,
+        );
+      }
+
+      onStatusUpdate?.call('Adding files to vault...');
+      debugPrint(
+          '[FileImport] Adding ${filesToVault.length} documents to vault');
+
+      // Add to vault
+      final imported = await _vaultService.addFiles(
+        files: filesToVault,
+        deleteOriginals: false,
+        onProgress: (current, total) {
+          onProgress?.call(totalFiles + current, totalFiles + total);
+        },
+      );
+
+      debugPrint('[FileImport] Imported ${imported.length} documents to vault');
+
+      // Delete originals if requested
+      bool deletedOriginals = false;
+      if (deleteOriginals && imported.isNotEmpty && pathsToDelete.isNotEmpty) {
+        debugPrint(
+            '[FileImport] Deleting ${pathsToDelete.length} original documents');
+        await _deleteFiles(pathsToDelete);
+        deletedOriginals = true;
+      }
+
+      final messageBuilder =
+          StringBuffer('Imported ${imported.length} document(s)');
+      if (convertedFiles.isNotEmpty) {
+        messageBuilder.write(' (${convertedFiles.length} converted to PDF)');
+      }
+      if (skippedFiles.isNotEmpty) {
+        messageBuilder.write(' (${skippedFiles.length} skipped)');
+      }
+      if (deletedOriginals) {
+        messageBuilder.write(' and removed originals');
+      }
+
+      return OfficeImportResult(
+        success: true,
+        importedFiles: imported,
+        convertedFiles: convertedFiles,
+        skippedFiles: skippedFiles,
+        message: messageBuilder.toString(),
+        deletedOriginals: deletedOriginals,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('[FileImport] Error importing documents with conversion: $e');
+      debugPrint('[FileImport] Stack trace: $stackTrace');
+      return OfficeImportResult(
+        success: false,
+        error: 'Failed to import documents: $e',
+        importedFiles: [],
+        convertedFiles: [],
+        skippedFiles: [],
+      );
+    }
+  }
+
   /// Import any files from file manager
   Future<ImportResult> importAnyFiles({
     bool deleteOriginals = true,
@@ -1210,5 +1495,80 @@ class UnhideResult {
       return 'UnhideResult: Success - ${message ?? "Unhidden $unhiddenCount file(s)"}';
     }
     return 'UnhideResult: Failed - $error';
+  }
+}
+
+/// Info about an Office file to be converted
+class OfficeFileInfo {
+  final String path;
+  final String fileName;
+  final String extension;
+  final bool canConvertOnDevice;
+
+  const OfficeFileInfo({
+    required this.path,
+    required this.fileName,
+    required this.extension,
+    required this.canConvertOnDevice,
+  });
+
+  String get typeName {
+    switch (extension.toLowerCase()) {
+      case 'docx':
+        return 'Word Document';
+      case 'doc':
+        return 'Word Document (Legacy)';
+      case 'odt':
+        return 'LibreOffice Writer';
+      case 'xlsx':
+        return 'Excel Spreadsheet';
+      case 'xls':
+        return 'Excel Spreadsheet (Legacy)';
+      case 'ods':
+        return 'LibreOffice Calc';
+      case 'pptx':
+        return 'PowerPoint Presentation';
+      case 'ppt':
+        return 'PowerPoint Presentation (Legacy)';
+      case 'odp':
+        return 'LibreOffice Impress';
+      case 'rtf':
+        return 'Rich Text Format';
+      default:
+        return 'Office Document';
+    }
+  }
+}
+
+/// Result of an import operation with Office conversion
+class OfficeImportResult {
+  final bool success;
+  final String? error;
+  final String? message;
+  final List<VaultedFile> importedFiles;
+  final List<String> convertedFiles;
+  final List<String> skippedFiles;
+  final bool deletedOriginals;
+
+  const OfficeImportResult({
+    required this.success,
+    this.error,
+    this.message,
+    required this.importedFiles,
+    required this.convertedFiles,
+    required this.skippedFiles,
+    this.deletedOriginals = false,
+  });
+
+  int get importedCount => importedFiles.length;
+  int get convertedCount => convertedFiles.length;
+  int get skippedCount => skippedFiles.length;
+
+  @override
+  String toString() {
+    if (success) {
+      return 'OfficeImportResult: Success - ${message ?? "Imported $importedCount file(s), converted $convertedCount, skipped $skippedCount"}';
+    }
+    return 'OfficeImportResult: Failed - $error';
   }
 }

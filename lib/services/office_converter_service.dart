@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
@@ -400,10 +401,24 @@ class OfficeConverterService {
     PdfPage page = document.pages.add();
     final pageSize = page.getClientSize();
 
-    // Create fonts
-    final titleFont =
-        PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold);
-    final bodyFont = PdfStandardFont(PdfFontFamily.helvetica, 11);
+    // Try to load custom font, otherwise use standard
+    PdfFont titleFont;
+    PdfFont bodyFont;
+    bool usingStandardFont = true;
+
+    try {
+      final fontData = await rootBundle.load('fonts/productsans_regular.ttf');
+      final fontBytes = fontData.buffer.asUint8List();
+
+      titleFont = PdfTrueTypeFont(fontBytes, 14, style: PdfFontStyle.bold);
+      bodyFont = PdfTrueTypeFont(fontBytes, 11);
+      usingStandardFont = false;
+    } catch (e) {
+      debugPrint('Could not load custom font for PDF: $e');
+      titleFont = PdfStandardFont(PdfFontFamily.helvetica, 14,
+          style: PdfFontStyle.bold);
+      bodyFont = PdfStandardFont(PdfFontFamily.helvetica, 11);
+    }
 
     // Text formatting
     final PdfStringFormat format = PdfStringFormat();
@@ -417,9 +432,21 @@ class OfficeConverterService {
     const double marginRight = 40;
     final textWidth = pageSize.width - marginLeft - marginRight;
 
+    // Helper to sanitize text
+    String sanitize(String text) {
+      // Always remove the Unicode replacement character (0xFFFD) as it often causes font issues
+      var processed = text.replaceAll('\uFFFD', '?');
+
+      if (!usingStandardFont) return processed;
+
+      // Standard PDF fonts only support Latin-1
+      return processed.replaceAll(RegExp(r'[^\x00-\xFF]'), '?');
+    }
+
     // Draw title
+    final titleText = sanitize(fileName.replaceAll(RegExp(r'\.[^.]+$'), ''));
     page.graphics.drawString(
-      fileName.replaceAll(RegExp(r'\.[^.]+$'), ''), // Remove extension
+      titleText,
       titleFont,
       bounds: Rect.fromLTWH(marginLeft, yPosition, textWidth, 30),
       format: format,
@@ -435,8 +462,10 @@ class OfficeConverterService {
     yPosition += 20;
 
     // Draw content paragraphs
-    for (final paragraph in paragraphs) {
-      if (paragraph.isEmpty) continue;
+    for (final rawParagraph in paragraphs) {
+      if (rawParagraph.isEmpty) continue;
+
+      final paragraph = sanitize(rawParagraph);
 
       // Calculate text height
       final textSize = bodyFont.measureString(

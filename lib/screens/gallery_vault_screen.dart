@@ -10,6 +10,7 @@ import '../providers/vault_providers.dart';
 import '../services/file_import_service.dart';
 import '../themes/app_colors.dart';
 import '../utils/toast_utils.dart';
+import '../widgets/office_conversion_confirm_dialog.dart';
 import 'albums_screen.dart';
 import 'favorites_screen.dart';
 import 'tags_screen.dart';
@@ -2702,29 +2703,53 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
       _importTotal = selectedDocuments.length;
     });
 
-    final result = await _importService.importFromDocumentFiles(
+    // Use the new conversion-aware import method
+    final result = await _importService.importFromDocumentFilesWithConversion(
       filePaths: selectedDocuments.map((d) => d.path).toList(),
       deleteOriginals: true, // Hide from file manager
+      onConversionConfirmation: (officeFiles) async {
+        // Show conversion confirmation dialog
+        if (!mounted) return false;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => OfficeConversionConfirmDialog(
+            officeFiles: officeFiles,
+            onConfirm: () => Navigator.pop(context, true),
+            onCancel: () => Navigator.pop(context, false),
+          ),
+        );
+        return confirmed ?? false;
+      },
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
           _importTotal = total;
         });
       },
+      onStatusUpdate: (message) {
+        // Could be used to show a status message
+        debugPrint('[Import] $message');
+      },
     );
 
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      final msg = result.deletedOriginals
-          ? 'Imported and hidden ${result.importedCount} document(s)'
-          : 'Imported ${result.importedCount} document(s)';
-      ToastUtils.showSuccess(msg);
+      final msgBuilder =
+          StringBuffer('Imported ${result.importedCount} document(s)');
+      if (result.convertedCount > 0) {
+        msgBuilder.write(' (${result.convertedCount} converted to PDF)');
+      }
+      if (result.deletedOriginals) {
+        msgBuilder.write(' and hidden from device');
+      }
+      ToastUtils.showSuccess(msgBuilder.toString());
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
     } else {
-      ToastUtils.showInfo('No documents selected');
+      ToastUtils.showInfo('No documents imported');
     }
   }
 
