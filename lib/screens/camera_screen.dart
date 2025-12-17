@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -34,6 +35,10 @@ class _CameraScreenState extends State<CameraScreen>
   double _currentScale = 1.0;
   double _baseScale = 1.0;
 
+  // Recording Timer
+  Timer? _recordingTimer;
+  Duration _recordingDuration = Duration.zero;
+
   // Animation controllers
   late AnimationController _focusAnimationController;
   late Animation<double> _focusAnimation;
@@ -60,6 +65,7 @@ class _CameraScreenState extends State<CameraScreen>
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
     _focusAnimationController.dispose();
+    _recordingTimer?.cancel();
     super.dispose();
   }
 
@@ -191,10 +197,30 @@ class _CameraScreenState extends State<CameraScreen>
 
     try {
       await _controller!.startVideoRecording();
-      setState(() => _isRecording = true);
+      setState(() {
+        _isRecording = true;
+        _recordingDuration = Duration.zero;
+      });
+      _startTimer();
     } catch (e) {
       debugPrint('Error starting video recording: $e');
     }
+  }
+
+  void _startTimer() {
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _recordingDuration += const Duration(seconds: 1);
+      });
+    });
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
   }
 
   Future<void> _stopRecording() async {
@@ -202,6 +228,7 @@ class _CameraScreenState extends State<CameraScreen>
 
     try {
       final XFile video = await _controller!.stopVideoRecording();
+      _recordingTimer?.cancel();
       setState(() => _isRecording = false);
       if (mounted) {
         Navigator.pop(context, video.path);
@@ -452,10 +479,14 @@ class _CameraScreenState extends State<CameraScreen>
                       ),
                       const SizedBox(height: 10),
                       if (_isRecording)
-                        const Text(
-                          "Recording...",
-                          style: TextStyle(
-                              color: Colors.red, fontWeight: FontWeight.bold),
+                        Text(
+                          _formatDuration(_recordingDuration),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            fontFamily: 'ProductSans',
+                          ),
                         ),
                     ],
                   ),
