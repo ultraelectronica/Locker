@@ -26,6 +26,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  archive: ^4.0.7
+  camera: ^0.11.3
   crypto: ^3.0.7
   cupertino_icons: ^1.0.6
   encrypt: ^5.0.3
@@ -41,14 +43,17 @@ dependencies:
   local_auth_android: ^2.0.3
   local_auth_darwin: ^2.0.1
   mime: ^2.0.0
+  open_filex: ^4.7.0
   path_provider: ^2.1.5
   pdfrx: ^2.2.16
   permission_handler: ^12.0.1
   photo_manager: ^3.7.1
   photo_view: ^0.15.0
   pointycastle: ^3.6.2
+  syncfusion_flutter_pdf: ^32.1.19
   uuid: ^4.5.2
   video_player: ^2.10.1
+  xml: ^6.6.1
 
 dev_dependencies:
   flutter_lints: ^6.0.0

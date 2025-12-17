@@ -2,11 +2,15 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
 import '../models/vaulted_file.dart';
 import '../providers/vault_providers.dart';
+import '../services/office_converter_service.dart';
 import '../themes/app_colors.dart';
 import '../utils/toast_utils.dart';
+import '../widgets/conversion_warning_dialog.dart';
 
 /// Document viewer for PDFs and text files
 class DocumentViewerScreen extends ConsumerStatefulWidget {
@@ -24,23 +28,130 @@ class DocumentViewerScreen extends ConsumerStatefulWidget {
 
 class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
   bool _isLoading = true;
+  bool _isConverting = false;
   String? _error;
   Uint8List? _decryptedData;
+  Uint8List? _convertedPdfData;
   String? _textContent;
   PdfViewerController? _pdfController;
   int _currentPage = 1;
   int _totalPages = 1;
+  bool _isOfficeDocument = false;
 
   @override
   void initState() {
     super.initState();
     _pdfController = PdfViewerController();
-    _loadDocument();
+    _isOfficeDocument =
+        OfficeConverterService.isOfficeDocument(widget.file.extension);
+
+    if (_isOfficeDocument) {
+      // For Office documents, show warning dialog first
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showConversionDialog();
+      });
+    } else {
+      _loadDocument();
+    }
   }
 
   @override
   void dispose() {
     super.dispose();
+  }
+
+  /// Show conversion warning dialog for Office documents
+  Future<void> _showConversionDialog() async {
+    final canConvert =
+        OfficeConverterService.canConvertOnDevice(widget.file.extension);
+
+    final shouldConvert = await showConversionWarningDialog(
+      context: context,
+      fileName: widget.file.originalName,
+      extension: widget.file.extension,
+      onOpenExternal: !canConvert ? () => _openWithExternalApp() : null,
+    );
+
+    if (!mounted) return;
+
+    if (shouldConvert) {
+      await _loadAndConvertDocument();
+    } else if (!canConvert) {
+      // User chose external app or cancelled - stay on screen to show options
+      setState(() {
+        _isLoading = false;
+      });
+    } else {
+      // User cancelled
+      Navigator.pop(context);
+    }
+  }
+
+  /// Load and convert Office document to PDF
+  Future<void> _loadAndConvertDocument() async {
+    setState(() {
+      _isLoading = true;
+      _isConverting = true;
+      _error = null;
+    });
+
+    try {
+      // Get file data (decrypt if needed)
+      Uint8List? fileData;
+      if (widget.file.isEncrypted && widget.file.encryptionIv != null) {
+        fileData = await ref
+            .read(vaultServiceProvider)
+            .getDecryptedFileData(widget.file.id);
+      } else {
+        fileData = await File(widget.file.vaultPath).readAsBytes();
+      }
+
+      if (fileData == null) {
+        setState(() {
+          _error = 'Failed to read document';
+          _isLoading = false;
+          _isConverting = false;
+        });
+        return;
+      }
+
+      // Convert to PDF
+      final converter = OfficeConverterService();
+      final result = await converter.convertToPdf(
+        fileData,
+        widget.file.originalName,
+        widget.file.extension,
+      );
+
+      if (!mounted) return;
+
+      if (result.success && result.pdfData != null) {
+        setState(() {
+          _convertedPdfData = result.pdfData;
+          _isLoading = false;
+          _isConverting = false;
+        });
+      } else if (result.requiresExternalApp) {
+        setState(() {
+          _error = result.error ?? 'This format requires an external app';
+          _isLoading = false;
+          _isConverting = false;
+        });
+      } else {
+        setState(() {
+          _error = result.error ?? 'Failed to convert document';
+          _isLoading = false;
+          _isConverting = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Failed to convert document: $e';
+        _isLoading = false;
+        _isConverting = false;
+      });
+    }
   }
 
   Future<void> _loadDocument() async {
@@ -91,9 +202,10 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
         ext == 'xml' ||
         ext == 'csv' ||
         ext == 'log' ||
-        ext == 'rtf' ||
         widget.file.mimeType.startsWith('text/');
   }
+
+  bool get _isConvertedPdf => _convertedPdfData != null;
 
   Future<void> _loadTextContent() async {
     try {
@@ -116,6 +228,103 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
     ToastUtils.showSuccess(
       widget.file.isFavorite ? 'Removed from favorites' : 'Added to favorites',
     );
+  }
+
+  Future<void> _exportToDownloads() async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.lightBackground,
+          content: Row(
+            children: [
+              CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation(AppColors.accent)),
+              const SizedBox(width: 20),
+              Expanded(
+                  child: Text('Exporting ${widget.file.originalName}...',
+                      style: const TextStyle(fontFamily: 'ProductSans'))),
+            ],
+          ),
+        ),
+      );
+
+      Directory? downloadsDir;
+      if (Platform.isAndroid) {
+        downloadsDir = Directory('/storage/emulated/0/Download');
+        if (!await downloadsDir.exists()) {
+          downloadsDir = await getExternalStorageDirectory();
+        }
+      } else {
+        downloadsDir = await getDownloadsDirectory();
+      }
+
+      if (downloadsDir == null) {
+        if (mounted) Navigator.pop(context);
+        ToastUtils.showError('Could not access Downloads folder');
+        return;
+      }
+
+      final destinationPath =
+          '${downloadsDir.path}/${widget.file.originalName}';
+      final vaultService = ref.read(vaultServiceProvider);
+      final exportedFile =
+          await vaultService.exportFile(widget.file.id, destinationPath);
+
+      if (mounted) Navigator.pop(context);
+
+      if (exportedFile != null) {
+        ToastUtils.showSuccess(
+            'Exported to Downloads/${widget.file.originalName}');
+      } else {
+        ToastUtils.showError('Failed to export file');
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      debugPrint('Error exporting file: $e');
+      ToastUtils.showError('Failed to export file: $e');
+    }
+  }
+
+  Future<void> _openWithExternalApp() async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.lightBackground,
+          content: Row(
+            children: [
+              CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation(AppColors.accent)),
+              const SizedBox(width: 20),
+              Expanded(
+                  child: Text('Preparing ${widget.file.originalName}...',
+                      style: const TextStyle(fontFamily: 'ProductSans'))),
+            ],
+          ),
+        ),
+      );
+
+      final vaultService = ref.read(vaultServiceProvider);
+      final decryptedFile = await vaultService.getVaultedFile(widget.file.id);
+
+      if (mounted) Navigator.pop(context);
+
+      if (decryptedFile != null && await decryptedFile.exists()) {
+        final result = await OpenFilex.open(decryptedFile.path);
+        if (result.type != ResultType.done) {
+          ToastUtils.showError('No app found to open this file type');
+        }
+      } else {
+        ToastUtils.showError('Failed to prepare file');
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      debugPrint('Error opening file: $e');
+      ToastUtils.showError('Failed to open file: $e');
+    }
   }
 
   void _showFileInfo() {
@@ -245,12 +454,23 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
             CircularProgressIndicator(color: AppColors.accent),
             const SizedBox(height: 16),
             Text(
-              'Loading document...',
+              _isConverting ? 'Converting to PDF...' : 'Loading document...',
               style: TextStyle(
                 fontFamily: 'ProductSans',
                 color: AppColors.lightTextSecondary,
               ),
             ),
+            if (_isConverting) ...[
+              const SizedBox(height: 8),
+              Text(
+                'This may take a moment',
+                style: TextStyle(
+                  fontFamily: 'ProductSans',
+                  fontSize: 12,
+                  color: AppColors.lightTextTertiary,
+                ),
+              ),
+            ],
           ],
         ),
       );
@@ -291,11 +511,78 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
 
     if (_isPdf) {
       return _buildPdfViewer();
+    } else if (_isConvertedPdf) {
+      return _buildConvertedPdfViewer();
     } else if (_isTextFile) {
       return _buildTextViewer();
     } else {
       return _buildUnsupportedViewer();
     }
+  }
+
+  Widget _buildConvertedPdfViewer() {
+    if (_convertedPdfData == null) {
+      return Center(
+        child: Text(
+          'No PDF data available',
+          style: TextStyle(
+            fontFamily: 'ProductSans',
+            color: AppColors.lightTextSecondary,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        // Conversion notice banner
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: Colors.blue.withValues(alpha: 0.1),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.blue, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Converted from ${widget.file.extension.toUpperCase()} to PDF',
+                  style: TextStyle(
+                    fontFamily: 'ProductSans',
+                    color: Colors.blue.shade700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // PDF viewer
+        Expanded(
+          child: PdfViewer.data(
+            _convertedPdfData!,
+            sourceName: '${widget.file.originalName}.pdf',
+            controller: _pdfController,
+            params: PdfViewerParams(
+              pageDropShadow: BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+              onViewerReady: (document, controller) {
+                setState(() {
+                  _totalPages = document.pages.length;
+                });
+              },
+              onPageChanged: (page) {
+                setState(() {
+                  _currentPage = page ?? 1;
+                });
+              },
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildPdfViewer() {
@@ -398,17 +685,33 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              ToastUtils.showInfo('Export coming soon');
-            },
-            icon: const Icon(Icons.download),
-            label: const Text('Export'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _exportToDownloads,
+                icon: const Icon(Icons.download),
+                label: const Text('Export'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accent,
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+              const SizedBox(width: 16),
+              OutlinedButton.icon(
+                onPressed: _openWithExternalApp,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Open with...'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  side: BorderSide(color: AppColors.accent),
+                ),
+              ),
+            ],
           ),
         ],
       ),

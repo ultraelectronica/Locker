@@ -530,7 +530,7 @@ class EncryptionService {
     return generateHash(data) == expectedHash;
   }
 
-  /// Securely delete a file (overwrite before delete)
+  /// Securely delete a file (overwrite before delete) - optimized for large files
   Future<bool> secureDelete(String filePath) async {
     try {
       final file = File(filePath);
@@ -539,12 +539,51 @@ class EncryptionService {
       // Get file size
       final length = await file.length();
 
-      // Overwrite with random data
-      final randomData = _generateRandomBytes(length);
-      await file.writeAsBytes(randomData);
+      // Open file for random access
+      final raf = await file.open(mode: FileMode.write);
 
-      // Overwrite with zeros
-      await file.writeAsBytes(List.filled(length, 0));
+      try {
+        // Use 1MB chunks for processing
+        const int chunkSize = 1024 * 1024;
+
+        // Generate one chunk of random data to reuse (much faster/lighter than generating unique for whole file)
+        // While theoretically less secure than unique random bytes for every byte,
+        // it serves the purpose of destorying the original data structure.
+        final randomChunk = _generateRandomBytes(chunkSize);
+        final zeroChunk = Uint8List(chunkSize); // Default initialized to 0
+
+        // Pass 1: Overwrite with random data
+        int written = 0;
+        await raf.setPosition(0);
+        while (written < length) {
+          final remaining = length - written;
+          final toWrite = remaining < chunkSize ? remaining : chunkSize;
+
+          if (toWrite == chunkSize) {
+            await raf.writeFrom(randomChunk);
+          } else {
+            await raf.writeFrom(randomChunk, 0, toWrite.toInt());
+          }
+          written += toWrite;
+        }
+
+        // Pass 2: Overwrite with zeros
+        written = 0;
+        await raf.setPosition(0);
+        while (written < length) {
+          final remaining = length - written;
+          final toWrite = remaining < chunkSize ? remaining : chunkSize;
+
+          if (toWrite == chunkSize) {
+            await raf.writeFrom(zeroChunk);
+          } else {
+            await raf.writeFrom(zeroChunk, 0, toWrite.toInt());
+          }
+          written += toWrite;
+        }
+      } finally {
+        await raf.close();
+      }
 
       // Delete the file
       await file.delete();

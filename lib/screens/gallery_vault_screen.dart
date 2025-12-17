@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/vaulted_file.dart';
 import '../models/album.dart';
 import '../providers/vault_providers.dart';
 import '../services/file_import_service.dart';
 import '../themes/app_colors.dart';
 import '../utils/toast_utils.dart';
+import '../widgets/office_conversion_confirm_dialog.dart';
 import 'albums_screen.dart';
 import 'favorites_screen.dart';
 import 'tags_screen.dart';
@@ -17,6 +20,7 @@ import '../widgets/permission_warning_banner.dart';
 import 'media_picker_screen.dart';
 import 'document_picker_screen.dart';
 import 'package:photo_manager/photo_manager.dart' hide AlbumType;
+import 'camera_screen.dart';
 
 /// Gallery vault screen - main screen after authentication
 class GalleryVaultScreen extends ConsumerStatefulWidget {
@@ -842,8 +846,461 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
         ),
       );
     } else {
-      // For other files, show info
-      ToastUtils.showInfo('Preview not available for ${file.originalName}');
+      // For other files, show export options
+      _showFileOptionsSheet(file);
+    }
+  }
+
+  /// Show options for files that don't have a preview
+  void _showFileOptionsSheet(VaultedFile file) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: AppColors.lightBackground,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.lightBorder,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // File info header
+                  Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getFileIcon(file.extension),
+                          size: 32,
+                          color: _getFileColor(file.extension),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              file.originalName,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.lightTextPrimary,
+                                fontFamily: 'ProductSans',
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${file.extension.toUpperCase()} • ${file.formattedSize}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.lightTextSecondary,
+                                fontFamily: 'ProductSans',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Preview not available',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.lightTextSecondary,
+                      fontFamily: 'ProductSans',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Export to Downloads
+                  ListTile(
+                    leading: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.accent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.download_outlined,
+                        color: AppColors.accent,
+                      ),
+                    ),
+                    title: const Text(
+                      'Export to Downloads',
+                      style: TextStyle(
+                        fontFamily: 'ProductSans',
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Save decrypted file to Downloads folder',
+                      style: TextStyle(
+                        fontFamily: 'ProductSans',
+                        fontSize: 12,
+                        color: AppColors.lightTextSecondary,
+                      ),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _exportFileToDownloads(file);
+                    },
+                  ),
+                  const Divider(height: 1),
+                  // Open with external app
+                  ListTile(
+                    leading: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.open_in_new,
+                        color: Colors.blue,
+                      ),
+                    ),
+                    title: const Text(
+                      'Open with...',
+                      style: TextStyle(
+                        fontFamily: 'ProductSans',
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Open file with an external app',
+                      style: TextStyle(
+                        fontFamily: 'ProductSans',
+                        fontSize: 12,
+                        color: AppColors.lightTextSecondary,
+                      ),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openWithExternalApp(file);
+                    },
+                  ),
+                  const Divider(height: 1),
+                  // File info
+                  ListTile(
+                    leading: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.info_outline,
+                        color: AppColors.lightTextSecondary,
+                      ),
+                    ),
+                    title: const Text(
+                      'File Info',
+                      style: TextStyle(
+                        fontFamily: 'ProductSans',
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'View file details',
+                      style: TextStyle(
+                        fontFamily: 'ProductSans',
+                        fontSize: 12,
+                        color: AppColors.lightTextSecondary,
+                      ),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showFileInfo(file);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: MediaQuery.of(context).padding.bottom),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Export a file to Downloads folder
+  Future<void> _exportFileToDownloads(VaultedFile file) async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.lightBackground,
+          content: Row(
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(AppColors.accent),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  'Exporting ${file.originalName}...',
+                  style: const TextStyle(fontFamily: 'ProductSans'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Get the Downloads directory
+      Directory? downloadsDir;
+      if (Platform.isAndroid) {
+        downloadsDir = Directory('/storage/emulated/0/Download');
+        if (!await downloadsDir.exists()) {
+          downloadsDir = await getExternalStorageDirectory();
+        }
+      } else {
+        downloadsDir = await getDownloadsDirectory();
+      }
+
+      if (downloadsDir == null) {
+        if (mounted) Navigator.pop(context);
+        ToastUtils.showError('Could not access Downloads folder');
+        return;
+      }
+
+      final destinationPath = '${downloadsDir.path}/${file.originalName}';
+
+      // Export the file using vault service
+      final vaultService = ref.read(vaultServiceProvider);
+      final exportedFile =
+          await vaultService.exportFile(file.id, destinationPath);
+
+      if (mounted) Navigator.pop(context);
+
+      if (exportedFile != null) {
+        ToastUtils.showSuccess('Exported to Downloads/${file.originalName}');
+      } else {
+        ToastUtils.showError('Failed to export file');
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      debugPrint('Error exporting file: $e');
+      ToastUtils.showError('Failed to export file: $e');
+    }
+  }
+
+  /// Open file with an external application
+  Future<void> _openWithExternalApp(VaultedFile file) async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.lightBackground,
+          content: Row(
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(AppColors.accent),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  'Preparing ${file.originalName}...',
+                  style: const TextStyle(fontFamily: 'ProductSans'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Get the decrypted file
+      final vaultService = ref.read(vaultServiceProvider);
+      final decryptedFile = await vaultService.getVaultedFile(file.id);
+
+      if (mounted) Navigator.pop(context);
+
+      if (decryptedFile != null && await decryptedFile.exists()) {
+        final result = await OpenFilex.open(decryptedFile.path);
+        if (result.type != ResultType.done) {
+          ToastUtils.showError('No app found to open this file type');
+        }
+      } else {
+        ToastUtils.showError('Failed to prepare file');
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      debugPrint('Error opening file: $e');
+      ToastUtils.showError('Failed to open file: $e');
+    }
+  }
+
+  /// Show file info dialog
+  void _showFileInfo(VaultedFile file) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.lightBackground,
+        title: Text(
+          'File Info',
+          style: TextStyle(
+            fontFamily: 'ProductSans',
+            color: AppColors.lightTextPrimary,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('Name', file.originalName),
+            const SizedBox(height: 12),
+            _buildInfoRow('Type', file.extension.toUpperCase()),
+            const SizedBox(height: 12),
+            _buildInfoRow('Size', file.formattedSize),
+            const SizedBox(height: 12),
+            _buildInfoRow('Added', _formatDate(file.dateAdded)),
+            const SizedBox(height: 12),
+            _buildInfoRow('Encrypted', file.isEncrypted ? 'Yes' : 'No'),
+            if (file.lastViewed != null) ...[
+              const SizedBox(height: 12),
+              _buildInfoRow('Last Viewed', _formatDate(file.lastViewed!)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Close',
+              style: TextStyle(
+                fontFamily: 'ProductSans',
+                color: AppColors.accent,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'ProductSans',
+              color: AppColors.lightTextSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontFamily: 'ProductSans',
+              color: AppColors.lightTextPrimary,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  IconData _getFileIcon(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
+        return Icons.folder_zip;
+      case 'apk':
+        return Icons.android;
+      case 'exe':
+      case 'msi':
+        return Icons.computer;
+      case 'mp3':
+      case 'wav':
+      case 'flac':
+      case 'aac':
+      case 'ogg':
+        return Icons.music_note;
+      case 'json':
+      case 'xml':
+      case 'html':
+      case 'css':
+      case 'js':
+        return Icons.code;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  Color _getFileColor(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
+        return Colors.amber;
+      case 'apk':
+        return Colors.green;
+      case 'exe':
+      case 'msi':
+        return Colors.blue;
+      case 'mp3':
+      case 'wav':
+      case 'flac':
+      case 'aac':
+      case 'ogg':
+        return Colors.purple;
+      case 'json':
+      case 'xml':
+      case 'html':
+      case 'css':
+      case 'js':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 
@@ -2193,9 +2650,23 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
 
   Future<void> _capturePhoto() async {
     Navigator.pop(context);
+
+    // Open custom camera
+    final String? imagePath = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CameraScreen(initialMode: CameraMode.photo),
+      ),
+    );
+
+    if (imagePath == null) return;
+
     setState(() => _isImporting = true);
 
-    final result = await _importService.capturePhotoFromCamera();
+    final result = await _importService.importFile(
+      filePath: imagePath,
+      deleteOriginal: true,
+    );
 
     setState(() => _isImporting = false);
 
@@ -2209,9 +2680,23 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
 
   Future<void> _recordVideo() async {
     Navigator.pop(context);
+
+    // Open custom camera
+    final String? videoPath = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CameraScreen(initialMode: CameraMode.video),
+      ),
+    );
+
+    if (videoPath == null) return;
+
     setState(() => _isImporting = true);
 
-    final result = await _importService.recordVideoFromCamera();
+    final result = await _importService.importFile(
+      filePath: videoPath,
+      deleteOriginal: true,
+    );
 
     setState(() => _isImporting = false);
 
@@ -2247,29 +2732,53 @@ class _GalleryVaultScreenState extends ConsumerState<GalleryVaultScreen>
       _importTotal = selectedDocuments.length;
     });
 
-    final result = await _importService.importFromDocumentFiles(
+    // Use the new conversion-aware import method
+    final result = await _importService.importFromDocumentFilesWithConversion(
       filePaths: selectedDocuments.map((d) => d.path).toList(),
       deleteOriginals: true, // Hide from file manager
+      onConversionConfirmation: (officeFiles) async {
+        // Show conversion confirmation dialog
+        if (!mounted) return false;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => OfficeConversionConfirmDialog(
+            officeFiles: officeFiles,
+            onConfirm: () => Navigator.pop(context, true),
+            onCancel: () => Navigator.pop(context, false),
+          ),
+        );
+        return confirmed ?? false;
+      },
       onProgress: (current, total) {
         setState(() {
           _importProgress = current;
           _importTotal = total;
         });
       },
+      onStatusUpdate: (message) {
+        // Could be used to show a status message
+        debugPrint('[Import] $message');
+      },
     );
 
     setState(() => _isImporting = false);
 
     if (result.success && result.importedCount > 0) {
-      final msg = result.deletedOriginals
-          ? 'Imported and hidden ${result.importedCount} document(s)'
-          : 'Imported ${result.importedCount} document(s)';
-      ToastUtils.showSuccess(msg);
+      final msgBuilder =
+          StringBuffer('Imported ${result.importedCount} document(s)');
+      if (result.convertedCount > 0) {
+        msgBuilder.write(' (${result.convertedCount} converted to PDF)');
+      }
+      if (result.deletedOriginals) {
+        msgBuilder.write(' and hidden from device');
+      }
+      ToastUtils.showSuccess(msgBuilder.toString());
       ref.read(vaultNotifierProvider.notifier).loadFiles();
     } else if (!result.success) {
       ToastUtils.showError(result.error ?? 'Import failed');
     } else {
-      ToastUtils.showInfo('No documents selected');
+      ToastUtils.showInfo('No documents imported');
     }
   }
 
@@ -2442,14 +2951,7 @@ class _ImportOptionsSheet extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: _ImportOptionTile(
-                        icon: Icons.folder_open_outlined,
-                        label: 'Any File',
-                        color: Colors.blueGrey,
-                        onTap: onImportAnyFiles,
-                      ),
-                    ),
+                    const Expanded(child: SizedBox()),
                     const SizedBox(width: 12),
                     const Expanded(child: SizedBox()),
                   ],
