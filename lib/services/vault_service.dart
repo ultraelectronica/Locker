@@ -1147,13 +1147,51 @@ class VaultService {
       final vaultedFile = await getFileById(fileId);
       if (vaultedFile == null) return null;
 
+      final sourceFile = File(vaultedFile.vaultPath);
+      if (!await sourceFile.exists()) return null;
+
+      final fileSize = await sourceFile.length();
+      const largeFileThreshold = 10 * 1024 * 1024; // 10MB
+      final isLargeFile = fileSize > largeFileThreshold;
+
       // If encrypted, decrypt first
       if (vaultedFile.isEncrypted && vaultedFile.encryptionIv != null) {
-        final result = await _encryptionService.decryptFile(
-          vaultedFile.vaultPath,
-          destinationPath,
-          vaultedFile.encryptionIv!,
-        );
+        // Check if it's a streamed CTR file by reading magic bytes
+        final raf = await sourceFile.open();
+        final header = await raf.read(4);
+        await raf.close();
+
+        final isStreamedFile = header.length >= 4 &&
+            header[0] == 0x4C &&
+            header[1] == 0x4B &&
+            header[2] == 0x52 &&
+            header[3] == 0x53;
+
+        FileDecryptionResult result;
+        if (isStreamedFile || isLargeFile) {
+          // Use streaming decryption for CTR files or large files
+          if (isStreamedFile) {
+            result = await _encryptionService.decryptFileStreamed(
+              vaultedFile.vaultPath,
+              destinationPath,
+              vaultedFile.encryptionIv!,
+            );
+          } else {
+            // Legacy CBC file but large - still use regular method
+            // (CBC can't be streamed without the full file)
+            result = await _encryptionService.decryptFile(
+              vaultedFile.vaultPath,
+              destinationPath,
+              vaultedFile.encryptionIv!,
+            );
+          }
+        } else {
+          result = await _encryptionService.decryptFile(
+            vaultedFile.vaultPath,
+            destinationPath,
+            vaultedFile.encryptionIv!,
+          );
+        }
 
         if (result.success && result.decryptedPath != null) {
           return File(result.decryptedPath!);
@@ -1161,9 +1199,11 @@ class VaultService {
         return null;
       }
 
-      final sourceFile = File(vaultedFile.vaultPath);
-      if (!await sourceFile.exists()) return null;
-
+      // Non-encrypted file - use streaming copy for large files
+      if (isLargeFile) {
+        await _streamCopyFile(sourceFile, File(destinationPath));
+        return File(destinationPath);
+      }
       return await sourceFile.copy(destinationPath);
     } catch (e) {
       debugPrint('Error exporting file: $e');
